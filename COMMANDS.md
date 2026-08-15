@@ -14,6 +14,19 @@ cd ~/atp-dev/webadmin
 sudo ./update.sh
 ```
 
+## Offline customer tarball (no git on site)
+```bash
+# On a machine that has this checkout (lab / engineer box):
+chmod +x pack-update.sh
+./pack-update.sh
+# writes enepath-webadmin-update-YYYYMMDD.tgz next to this script
+
+# Copy the .tgz to the customer AMP (USB). On site:
+tar xzf enepath-webadmin-update-YYYYMMDD.tgz
+cd enepath-webadmin-update
+sudo ./update.sh
+```
+
 ## Logs
 ```bash
 # App log (last 50 lines)
