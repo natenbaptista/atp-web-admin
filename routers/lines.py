@@ -64,14 +64,14 @@ _FWD_LEGACY = {
 }
 
 
-# ── Index ─────────────────────────────────────────────────────────────────────
+# ── Index ─────────────────────────────────────────────────────────────────
 
 @router.get("")
 async def lines_index():
     return FileResponse(PUBLIC_DIR / "index.html")
 
 
-# ── AJAX search ───────────────────────────────────────────────────────────────
+# ── AJAX search ───────────────────────────────────────────────────────────
 
 @router.get("/search", response_class=JSONResponse)
 async def lines_search(
@@ -82,7 +82,17 @@ async def lines_search(
 ):
     per_page = max(1, min(per_page, 200))
     page = max(1, page)
-    raw = await _safe_line_search(q)
+    # ATP line_search(q) is exact linename when fuzzy_search=0, so "24" misses 2400.
+    # List all, then prefix-filter the LINE NAME column (dn / name / linename).
+    raw = await _safe_line_search("")
+    qn = (q or "").strip()
+    if qn:
+        ql = qn.lower()
+
+        def _line_name(ln: dict) -> str:
+            return str(ln.get("dn") or ln.get("name") or ln.get("linename") or "").strip()
+
+        raw = [ln for ln in raw if _line_name(ln).lower().startswith(ql)]
     total = len(raw)
     start = (page - 1) * per_page
     page_slice = raw[start: start + per_page]
@@ -96,7 +106,7 @@ async def lines_search(
     }
 
 
-# ── All line names (for button config dropdown) ────────────────────────────────
+# ── All line names (for button config dropdown) ────────────────────────────
 
 @router.get("/names", response_class=JSONResponse)
 async def lines_names(
@@ -195,7 +205,7 @@ async def lines_validate_name(
     return {"valid": True}
 
 
-# ── Add ───────────────────────────────────────────────────────────────────────
+# ── Add ───────────────────────────────────────────────────────────────
 
 @router.get("/add")
 async def lines_add_form():
@@ -248,7 +258,7 @@ async def lines_add_post(
     return JSONResponse({"ok": True})
 
 
-# ── Import ────────────────────────────────────────────────────────────────────
+# ── Import ────────────────────────────────────────────────────────────
 # NOTE: must be registered BEFORE /{dn}/edit so FastAPI matches literal "import" first.
 
 @router.post("/import", response_class=JSONResponse)
@@ -327,7 +337,7 @@ async def lines_import(
     }
 
 
-# ── Detail (full config for edit form) ───────────────────────────────────────
+# ── Detail (full config for edit form) ─────────────────────────────────────
 
 @router.get("/{dn}/detail", response_class=JSONResponse)
 async def lines_detail(
@@ -348,7 +358,7 @@ async def lines_detail(
     return line
 
 
-# ── Users on a line ───────────────────────────────────────────────────────────
+# ── Users on a line ───────────────────────────────────────────
 
 @router.get("/{dn}/users", response_class=JSONResponse)
 async def lines_users_on_line(
@@ -362,7 +372,7 @@ async def lines_users_on_line(
         return []
 
 
-# ── Edit ──────────────────────────────────────────────────────────────────────
+# ── Edit ──────────────────────────────────────────────────────────────
 
 @router.get("/{dn}/edit")
 async def lines_edit_form():
@@ -407,7 +417,7 @@ async def lines_edit_post(
     return JSONResponse({"ok": True})
 
 
-# ── Delete ────────────────────────────────────────────────────────────────────
+# ── Delete ────────────────────────────────────────────────────────────
 
 @router.post("/{dn}/delete")
 async def lines_delete(
@@ -422,7 +432,7 @@ async def lines_delete(
     return RedirectResponse(url="/lines", status_code=303)
 
 
-# ── Blacklist report ──────────────────────────────────────────────────────────
+# ── Blacklist report ──────────────────────────────────────────
 
 @router.get("/blacklist-report")
 async def lines_blacklist_report(
@@ -451,7 +461,7 @@ async def lines_blacklist_report(
     return FileResponse(PUBLIC_DIR / "index.html")
 
 
-# ── Line groups ───────────────────────────────────────────────────────────────
+# ── Line groups ───────────────────────────────────────────────
 
 @router.get("/line-groups/search", response_class=JSONResponse)
 async def line_groups_search_json(
@@ -519,7 +529,7 @@ async def line_groups_delete(
     return RedirectResponse(url="/lines/line-groups", status_code=303)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────
 
 async def _safe_line_search(q: str = "") -> list:
     try:
