@@ -491,7 +491,7 @@
       return '<img class="thumb" alt="" src="' + imgUrl("logo", row.company_logo) + '" />';
     }
     const v = row[key];
-    return escapeHtml(v == null || v === "" ? "\u2014" : String(v));
+    return escapeHtml(v == null || v === "" ? "—" : String(v));
   }
 
   function renderTable() {
