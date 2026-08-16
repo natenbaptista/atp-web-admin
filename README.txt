@@ -1,17 +1,28 @@
-enePath webadmin — Line dropdown appearances
-===========================================
+enePath webadmin
+================
 
-This archive is the finished routers/lines.py. No patch. No scripts.
+Source of truth: https://github.com/natenbaptista/atp-web-admin
+Default branch: main
 
-On the AMP box:
+The running app is /opt/enepath/webadmin. A git pull in a checkout
+does not update the UI until update.sh copies the tree there.
 
-  cd ~/atp/deploy/webadmin
-  tar xzf enepath-mla-lines.tgz
+Engineer update (AMP already installed)
+---------------------------------------
+  git clone https://github.com/natenbaptista/atp-web-admin.git
+  cd atp-web-admin
   sudo ./update.sh
 
-If you have no update.sh:
+If the clone already exists:
+  cd atp-web-admin
+  ./pull-update.sh
 
-  sudo cp routers/lines.py /opt/enepath/webadmin/routers/lines.py
-  sudo systemctl restart enepath-webadmin
+That is: git pull --ff-only origin main && sudo ./update.sh
+Then hard-refresh the browser (Ctrl+Shift+R).
 
-Check: Mc.Gyver button Line dropdown should list 6000--1, 6000--2 (not 6000).
+Check
+  Global Directory: green SPA, Show columns, Sort columns,
+  contacts per page, "N contacts" / "Showing X of Y"
+  Edit + Save works
+  Lines search: type 24, table shows 2400...
+  Line dropdown: 6000--1 / 6000--2
