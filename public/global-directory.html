@@ -60,21 +60,38 @@
     .filters { display: flex; flex-wrap: wrap; gap: 12px; padding: 0 14px 14px; align-items: flex-end; }
     .field { display: flex; flex-direction: column; gap: 5px; min-width: 140px; }
     .field label, .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+    .contact-count { font-size: 14px; font-weight: 650; color: var(--text); padding: 0 14px 10px; }
+    .pagesize-row {
+      display: flex; align-items: center; gap: 8px; color: var(--text); font-size: 13px; white-space: nowrap;
+    }
+    .pagesize-row select { width: auto; min-width: 72px; }
+    .section { padding: 12px 14px 14px; border-top: 1px solid var(--border); }
+    .section-title { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+    .section .hint { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
     .col-grid {
       display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 4px 12px;
-      padding: 10px 14px 14px; border-top: 1px solid var(--border);
     }
     .col-grid label.chk {
       display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px;
       text-transform: none; letter-spacing: 0; color: var(--text); font-weight: 500; cursor: pointer;
     }
     .col-grid label.chk input { width: auto; }
-    .col-grid .hint { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+    .sort-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+    .sort-actions select { width: auto; min-width: 88px; }
     table { width: 100%; border-collapse: collapse; }
     th, td { padding: 10px 12px; border-top: 1px solid var(--border); text-align: left; vertical-align: middle; }
     th { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 700; background: hsl(160, 10%, 11%); position: sticky; top: 0; }
     tr.row:hover { background: hsl(160, 10%, 16%); }
     .thumb { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; border: 1px solid var(--border); background: var(--input); display: block; }
+    .preview {
+      width: 80px; height: 80px; object-fit: cover; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--input); margin-top: 8px; display: block;
+    }
+    .bulk-previews { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .bulk-previews img {
+      width: 48px; height: 48px; object-fit: cover; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--input);
+    }
     .noimg { color: var(--muted); font-size: 12px; font-style: italic; }
     .actions { display: flex; gap: 6px; white-space: nowrap; }
     .pager { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; color: var(--muted); font-size: 13px; flex-wrap: wrap; }
@@ -100,7 +117,6 @@
     .toast.ok { border-color: hsl(156, 29%, 34%); }
     .toast.bad { border-color: var(--danger); }
     .hidden { display: none !important; }
-    .sort-row { display: flex; gap: 8px; align-items: center; }
     @media (max-width: 820px) {
       .modal .bd { grid-template-columns: 1fr; }
       header.top { flex-direction: column; align-items: flex-start; }
@@ -132,37 +148,46 @@
         <input type="file" id="importFile" class="hidden" accept=".csv,.txt" />
       </div>
 
+      <div id="contactCount" class="contact-count">0 contacts</div>
+
       <div class="filters">
+        <div class="field">
+          <label for="pageSize">Contact view per page</label>
+          <div class="pagesize-row">
+            <span>Show contacts</span>
+            <select id="pageSize">
+              <option>10</option>
+              <option>25</option>
+              <option>50</option>
+              <option>100</option>
+            </select>
+            <span>per page</span>
+          </div>
+        </div>
         <div class="field search">
           <label for="q">Search Contact</label>
           <input type="search" id="q" placeholder="Search Contact" autocomplete="off" />
         </div>
-        <div class="field">
-          <label for="sortField">Sort</label>
-          <div class="sort-row">
-            <select id="sortField"></select>
-            <select id="sortDir">
-              <option value="asc">asc</option>
-              <option value="desc">desc</option>
-            </select>
-          </div>
-        </div>
-        <div class="field">
-          <label for="pageSize">Page size</label>
-          <select id="pageSize">
-            <option>10</option>
-            <option>25</option>
-            <option>50</option>
-            <option>100</option>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Show columns</div>
+        <div class="hint">Max 4 extra — Name and Actions always shown</div>
+        <div class="col-grid" id="colGrid"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Sort columns</div>
+        <div class="col-grid" id="sortGrid"></div>
+        <div class="sort-actions">
+          <label class="lbl" for="sortDir" style="margin:0">Direction</label>
+          <select id="sortDir">
+            <option value="asc">asc</option>
+            <option value="desc">desc</option>
           </select>
-        </div>
-        <div class="field">
-          <label>&nbsp;</label>
           <button class="btn ghost" id="btnReload" type="button">Reload</button>
         </div>
       </div>
-
-      <div class="col-grid" id="colGrid"></div>
 
       <div style="overflow:auto">
         <table>
@@ -172,7 +197,7 @@
       </div>
       <div class="empty hidden" id="empty">No contacts to display.</div>
       <div class="pager">
-        <div id="pageInfo">Displaying 0 of 0</div>
+        <div id="pageInfo">Showing 0 of 0 contacts</div>
         <div class="btns">
           <button class="btn ghost" id="prev" type="button">Prev</button>
           <button class="btn ghost" id="next" type="button">Next</button>
@@ -240,11 +265,13 @@
             <div class="lbl">Profile Picture</div>
             <input type="file" name="profile_pic" accept="image/*" />
             <div class="help">Allowed size: up to 500x500 px</div>
+            <img id="previewProfile" class="preview hidden" alt="Profile preview" />
           </div>
           <div>
             <div class="lbl">Company Logo</div>
             <input type="file" name="company_logo" accept="image/*" />
             <div class="help">Allowed size: up to 500x500 px</div>
+            <img id="previewLogo" class="preview hidden" alt="Logo preview" />
           </div>
         </div>
         <div class="ft">
@@ -266,6 +293,7 @@
           <div class="lbl">Upload Profile Images</div>
           <input type="file" id="bulkProfiles" accept="image/*" multiple />
           <div class="help">Allowed size: up to 500x500 px. Field name: files</div>
+          <div id="bulkProfilePreviews" class="bulk-previews"></div>
         </div>
         <div class="full">
           <button class="btn" id="btnUploadProfiles" type="button">Upload Profile Images</button>
@@ -274,6 +302,7 @@
           <div class="lbl">Upload Logos</div>
           <input type="file" id="bulkLogos" accept="image/*" multiple />
           <div class="help">Allowed size: up to 500x500 px. Field name: files</div>
+          <div id="bulkLogoPreviews" class="bulk-previews"></div>
         </div>
         <div class="full">
           <button class="btn" id="btnUploadLogos" type="button">Upload Logos</button>
@@ -286,18 +315,17 @@
 
   <script>
   const EXTRA_FIELDS = [
-    { key: "phone1", label: "Phone" },
-    { key: "phone2", label: "Phone 2" },
-    { key: "phone3", label: "Phone 3" },
+    { key: "phone1", label: "Phone1" },
+    { key: "phone2", label: "Phone2" },
+    { key: "phone3", label: "Phone3" },
     { key: "email", label: "Email" },
-    { key: "profile_pic", label: "Profile" },
-    { key: "company_logo", label: "Logo" },
+    { key: "profile_pic", label: "Profile Picture" },
     { key: "designation", label: "Designation" },
-    { key: "company_name", label: "Company" },
+    { key: "company_name", label: "Company Name" },
     { key: "company_type", label: "Company Type" },
     { key: "group", label: "Group" },
-    { key: "company_address", label: "Address" },
-    { key: "cn", label: "Type (cn)" },
+    { key: "company_address", label: "Company Address" },
+    { key: "company_logo", label: "Company Logo" },
   ];
   const SORT_FIELDS = [{ key: "name", label: "Name" }].concat(EXTRA_FIELDS);
   const DEFAULT_EXTRAS = ["phone1", "profile_pic", "company_name", "email"];
@@ -375,16 +403,19 @@
     return state.pendingCols || loadCols();
   }
 
+  function currentSort() {
+    return state.pendingSort || loadSort();
+  }
+
   function renderColGrid() {
     const grid = document.getElementById("colGrid");
     const cols = currentCols();
-    const boxes = EXTRA_FIELDS.map(function (f) {
+    grid.innerHTML = EXTRA_FIELDS.map(function (f) {
       const checked = cols.indexOf(f.key) >= 0;
       const disable = !checked && cols.length >= 4;
       return '<label class="chk"><input type="checkbox" data-col="' + f.key + '"' +
         (checked ? " checked" : "") + (disable ? " disabled" : "") + "> " + f.label + "</label>";
     }).join("");
-    grid.innerHTML = '<div class="hint">Show columns (max 4 extra — Name and Actions always shown)</div>' + boxes;
     grid.querySelectorAll("input").forEach(function (inp) {
       inp.addEventListener("change", function () {
         var next = currentCols().slice();
@@ -401,13 +432,20 @@
     });
   }
 
-  function fillSortOptions() {
-    const sel = document.getElementById("sortField");
-    sel.innerHTML = SORT_FIELDS.map(function (f) {
-      return '<option value="' + f.key + '">' + f.label + "</option>";
+  function renderSortGrid() {
+    const grid = document.getElementById("sortGrid");
+    const s = currentSort();
+    grid.innerHTML = SORT_FIELDS.map(function (f) {
+      return '<label class="chk"><input type="radio" name="sortField" value="' + f.key + '"' +
+        (s.field === f.key ? " checked" : "") + "> " + f.label + "</label>";
     }).join("");
-    const s = loadSort();
-    sel.value = s.field;
+    grid.querySelectorAll("input").forEach(function (inp) {
+      inp.addEventListener("change", function () {
+        const dir = document.getElementById("sortDir").value;
+        state.pendingSort = { field: inp.value, dir: dir };
+        saveSort(inp.value, dir);
+      });
+    });
     document.getElementById("sortDir").value = s.dir;
     document.getElementById("pageSize").value = String(loadPageSize());
   }
@@ -487,7 +525,8 @@
     }).join("");
 
     document.getElementById("empty").classList.toggle("hidden", pageRows.length > 0);
-    document.getElementById("pageInfo").textContent = "Displaying " + pageRows.length + " of " + rows.length;
+    document.getElementById("contactCount").textContent = rows.length + (rows.length === 1 ? " contact" : " contacts");
+    document.getElementById("pageInfo").textContent = "Showing " + pageRows.length + " of " + rows.length + " contacts";
     document.getElementById("prev").disabled = state.page <= 1;
     document.getElementById("next").disabled = state.page >= pages;
     document.getElementById("btnDeleteSel").disabled = state.selected.size === 0;
@@ -522,13 +561,16 @@
   }
 
   function applyLayout() {
-    const field = document.getElementById("sortField").value;
+    const radio = document.querySelector('input[name="sortField"]:checked');
+    const field = radio ? radio.value : "name";
     const dir = document.getElementById("sortDir").value;
     saveSort(field, dir);
     savePageSize(parseInt(document.getElementById("pageSize").value, 10));
     if (state.pendingCols) saveCols(state.pendingCols);
     state.pendingCols = null;
+    state.pendingSort = null;
     renderColGrid();
+    renderSortGrid();
     renderTable();
   }
 
@@ -543,10 +585,27 @@
   function openBulk() { document.getElementById("bulkBg").classList.add("open"); }
   function closeBulk() { document.getElementById("bulkBg").classList.remove("open"); }
 
+  function showPreview(el, src) {
+    if (!el) return;
+    el.src = src;
+    el.classList.remove("hidden");
+  }
+  function hidePreview(el) {
+    if (!el) return;
+    el.removeAttribute("src");
+    el.classList.add("hidden");
+  }
+  function clearBulkPreviews(id) {
+    const box = document.getElementById(id);
+    if (box) box.innerHTML = "";
+  }
+
   function resetForm() {
     const form = document.getElementById("form");
     form.reset();
     form.querySelectorAll("[data-err]").forEach(function (el) { el.textContent = ""; });
+    hidePreview(document.getElementById("previewProfile"));
+    hidePreview(document.getElementById("previewLogo"));
   }
 
   function openNew() {
@@ -564,6 +623,8 @@
     TEXT_FIELDS.forEach(function (k) {
       if (form.elements[k]) form.elements[k].value = row[k] || "";
     });
+    if (row.profile_pic) showPreview(document.getElementById("previewProfile"), imgUrl("profile", row.profile_pic));
+    if (row.company_logo) showPreview(document.getElementById("previewLogo"), imgUrl("logo", row.company_logo));
     openModal("Edit");
   }
 
@@ -578,16 +639,16 @@
 
   function checkImageFile(file) {
     return new Promise(function (resolve, reject) {
-      if (!file) { resolve(true); return; }
+      if (!file) { resolve({ ok: true, dataUrl: null }); return; }
       const reader = new FileReader();
       reader.onload = function () {
         const img = new Image();
         img.onload = function () {
           if (img.width > 500 || img.height > 500) {
             alert("Image too large");
-            resolve(false);
+            resolve({ ok: false, reason: "too-large", dataUrl: null });
           } else {
-            resolve(true);
+            resolve({ ok: true, dataUrl: reader.result });
           }
         };
         img.onerror = function () {
@@ -602,13 +663,56 @@
     });
   }
 
-  async function rejectIfTooLarge(input) {
-    const files = Array.prototype.slice.call(input.files || []);
-    for (let i = 0; i < files.length; i++) {
-      const ok = await checkImageFile(files[i]);
-      if (!ok) { input.value = ""; return false; }
+  async function previewPickedFile(input, previewEl) {
+    const file = input.files && input.files[0];
+    if (!file) {
+      hidePreview(previewEl);
+      return false;
     }
-    return true;
+    try {
+      const result = await checkImageFile(file);
+      if (!result.ok) {
+        input.value = "";
+        hidePreview(previewEl);
+        return false;
+      }
+      showPreview(previewEl, result.dataUrl);
+      return true;
+    } catch (e) {
+      input.value = "";
+      hidePreview(previewEl);
+      toast(e.message || "Invalid image", "bad");
+      return false;
+    }
+  }
+
+  async function previewBulkFiles(input, boxId) {
+    const box = document.getElementById(boxId);
+    if (box) box.innerHTML = "";
+    const files = Array.prototype.slice.call(input.files || []);
+    if (!files.length) return true;
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const result = await checkImageFile(files[i]);
+        if (!result.ok) {
+          input.value = "";
+          if (box) box.innerHTML = "";
+          return false;
+        }
+        if (box && result.dataUrl) {
+          const img = document.createElement("img");
+          img.alt = "";
+          img.src = result.dataUrl;
+          box.appendChild(img);
+        }
+      }
+      return true;
+    } catch (e) {
+      input.value = "";
+      if (box) box.innerHTML = "";
+      toast(e.message || "Invalid image", "bad");
+      return false;
+    }
   }
 
   async function saveForm(ev) {
@@ -618,8 +722,10 @@
     const p = form.elements.profile_pic.files[0];
     const l = form.elements.company_logo.files[0];
     try {
-      if (!(await checkImageFile(p))) return;
-      if (!(await checkImageFile(l))) return;
+      const pOk = await checkImageFile(p);
+      if (!pOk.ok) return;
+      const lOk = await checkImageFile(l);
+      if (!lOk.ok) return;
     } catch (e) {
       toast(e.message || "Invalid image", "bad");
       return;
@@ -681,33 +787,35 @@
     }
   }
 
-  async function uploadBulk(inputId, url) {
+  async function uploadBulk(inputId, url, previewId) {
     const input = document.getElementById(inputId);
     const files = Array.prototype.slice.call(input.files || []);
     if (!files.length) { toast("Choose files first", "bad"); return; }
     try {
       for (let i = 0; i < files.length; i++) {
-        const ok = await checkImageFile(files[i]);
-        if (!ok) return;
+        const result = await checkImageFile(files[i]);
+        if (!result.ok) return;
       }
       const fd = new FormData();
       files.forEach(function (f) { fd.append("files", f); });
       const data = await apiJson(url, { method: "POST", body: fd });
       toast("Uploaded " + (data.uploaded || 0) + " file(s)" + (data.failed ? (", " + data.failed + " failed") : ""), data.failed ? "bad" : "ok");
       input.value = "";
+      clearBulkPreviews(previewId);
     } catch (e) {
       toast(e.message || "Upload failed", "bad");
     }
   }
 
   function wire() {
-    fillSortOptions();
     renderColGrid();
-    document.getElementById("sortField").addEventListener("change", function () {
-      saveSort(document.getElementById("sortField").value, document.getElementById("sortDir").value);
-    });
+    renderSortGrid();
     document.getElementById("sortDir").addEventListener("change", function () {
-      saveSort(document.getElementById("sortField").value, document.getElementById("sortDir").value);
+      const radio = document.querySelector('input[name="sortField"]:checked');
+      const field = radio ? radio.value : "name";
+      const dir = document.getElementById("sortDir").value;
+      state.pendingSort = { field: field, dir: dir };
+      saveSort(field, dir);
     });
     document.getElementById("pageSize").addEventListener("change", function () {
       savePageSize(parseInt(document.getElementById("pageSize").value, 10));
@@ -742,10 +850,10 @@
     document.getElementById("bulkClose").addEventListener("click", closeBulk);
     document.getElementById("bulkBg").addEventListener("click", function (ev) { if (ev.target.id === "bulkBg") closeBulk(); });
     document.getElementById("btnUploadProfiles").addEventListener("click", function () {
-      uploadBulk("bulkProfiles", "/directory/global/upload-profile-images");
+      uploadBulk("bulkProfiles", "/directory/global/upload-profile-images", "bulkProfilePreviews");
     });
     document.getElementById("btnUploadLogos").addEventListener("click", function () {
-      uploadBulk("bulkLogos", "/directory/global/upload-company-logos");
+      uploadBulk("bulkLogos", "/directory/global/upload-company-logos", "bulkLogoPreviews");
     });
     document.getElementById("btnUpdateTop").addEventListener("click", doUpdate);
     document.getElementById("btnUpdateBottom").addEventListener("click", doUpdate);
@@ -754,10 +862,18 @@
     document.getElementById("modalBg").addEventListener("click", function (ev) { if (ev.target.id === "modalBg") closeModal(); });
     document.addEventListener("keydown", function (ev) { if (ev.key === "Escape") { closeModal(); closeBulk(); } });
     document.getElementById("form").addEventListener("submit", saveForm);
-    document.querySelector('input[name="profile_pic"]').addEventListener("change", function (ev) { rejectIfTooLarge(ev.target); });
-    document.querySelector('input[name="company_logo"]').addEventListener("change", function (ev) { rejectIfTooLarge(ev.target); });
-    document.getElementById("bulkProfiles").addEventListener("change", function (ev) { rejectIfTooLarge(ev.target); });
-    document.getElementById("bulkLogos").addEventListener("change", function (ev) { rejectIfTooLarge(ev.target); });
+    document.querySelector('input[name="profile_pic"]').addEventListener("change", function (ev) {
+      previewPickedFile(ev.target, document.getElementById("previewProfile"));
+    });
+    document.querySelector('input[name="company_logo"]').addEventListener("change", function (ev) {
+      previewPickedFile(ev.target, document.getElementById("previewLogo"));
+    });
+    document.getElementById("bulkProfiles").addEventListener("change", function (ev) {
+      previewBulkFiles(ev.target, "bulkProfilePreviews");
+    });
+    document.getElementById("bulkLogos").addEventListener("change", function (ev) {
+      previewBulkFiles(ev.target, "bulkLogoPreviews");
+    });
   }
 
   (async function init() {
