@@ -77,7 +77,7 @@ _HEADER_ALIASES = {
 }
 
 
-# ── Paths ──────────────────────────────────────────────────────────────────
+# ── Paths ──────────────────────────────────────────────────────────────────────
 
 def _global_dir_base() -> pathlib.Path:
     """Root of the portable global directory on disk."""
@@ -110,7 +110,7 @@ def _db_path() -> pathlib.Path:
     return _global_dir_base() / "global_directory.db"
 
 
-# ── SQLite helpers ───────────────────────────────────────────────────────────
+# ── SQLite helpers ─────────────────────────────────────────────────────────────
 
 _TABLE_READY = False
 _INIT_LOCK = asyncio.Lock()
@@ -290,7 +290,7 @@ async def _db(fn, *args, **kwargs):
     return await asyncio.to_thread(_run_db, fn, *args, **kwargs)
 
 
-# ── txt file helpers ─────────────────────────────────────────────────────────
+# ── txt file helpers ───────────────────────────────────────────────────────────
 
 def _clean_address(addr: str) -> str:
     return re.sub(r"[\r\n\t]+", " ", (addr or "").strip())
@@ -360,7 +360,7 @@ def _regenerate_txt(conn: sqlite3.Connection) -> int:
     return len(rows)
 
 
-# ── Image helpers ───────────────────────────────────────────────────────────
+# ── Image helpers ─────────────────────────────────────────────────────────────
 
 def _sanitise_filename(name: str) -> str:
     return re.sub(r"\s+", "_", pathlib.Path(name).name)
@@ -416,14 +416,53 @@ def _validate_name_phone(name: str, phone1: str) -> None:
         raise HTTPException(status_code=400, detail="Phone is required")
 
 
-# ── Index (SPA) ────────────────────────────────────────────────────────────
+def _form_text(form, key: str, default: str = "") -> str:
+    """Read a text field from multipart. Ignore UploadFile values (SPA also
+    appends profile_pic/company_logo as filename strings)."""
+    for v in form.getlist(key):
+        if hasattr(v, "filename"):
+            continue
+        return str(v) if v is not None else default
+    return default
+
+
+def _form_upload(form, key: str):
+    """Return the first real file upload for key, if any.
+
+    The React SPA always FormData.append()s profile_pic/company_logo as the
+    existing filename string, then optionally appends a File. FastAPI File()
+    rejects the string with 422 (Expected UploadFile, received str).
+    """
+    for v in form.getlist(key):
+        if hasattr(v, "filename") and getattr(v, "filename", None):
+            return v
+    return None
+
+
+def _entry_payload_from_form(form) -> dict:
+    return {
+        "cn": _form_text(form, "cn"),
+        "name": _form_text(form, "name").strip(),
+        "phone1": _form_text(form, "phone1").strip(),
+        "company_name": _form_text(form, "company_name"),
+        "company_type": _form_text(form, "company_type"),
+        "group": _form_text(form, "group"),
+        "email": _form_text(form, "email"),
+        "company_address": _form_text(form, "company_address"),
+        "phone2": _form_text(form, "phone2"),
+        "phone3": _form_text(form, "phone3"),
+        "designation": _form_text(form, "designation"),
+    }
+
+
+# ── Index (SPA) ──────────────────────────────────────────────────────────────
 
 @router.get("")
 async def directory_index():
     return FileResponse(PUBLIC_DIR / "index.html")
 
 
-# ── AJAX search (users + lines) ────────────────────────────────────────────
+# ── AJAX search (users + lines) ────────────────────────────────────────────────
 
 @router.get("/search", response_class=JSONResponse)
 async def directory_search(
@@ -520,39 +559,23 @@ def _add_sync(conn: sqlite3.Connection, payload: dict) -> dict:
 
 @router.post("/global/add", response_class=JSONResponse)
 async def global_dir_add(
+    request: Request,
     session: dict = Depends(require_session),
-    cn: str = Form(""),
-    name: str = Form(""),
-    phone1: str = Form(""),
-    company_name: str = Form(""),
-    company_type: str = Form(""),
-    group: str = Form(""),
-    email: str = Form(""),
-    company_address: str = Form(""),
-    phone2: str = Form(""),
-    phone3: str = Form(""),
-    designation: str = Form(""),
-    profile_pic: Optional[UploadFile] = File(None),
-    company_logo: Optional[UploadFile] = File(None),
 ):
-    _validate_name_phone(name, phone1)
+    """Accept SPA multipart: text fields plus optional file uploads.
 
-    profile_filename = ""
-    logo_filename = ""
+    The SPA always sends profile_pic/company_logo as filename strings; only a
+    newly chosen File is treated as an upload.
+    """
+    form = await request.form()
+    payload = _entry_payload_from_form(form)
+    _validate_name_phone(payload["name"], payload["phone1"])
 
-    if profile_pic and profile_pic.filename:
-        profile_filename = await _save_image(profile_pic, _profile_dir())
+    profile_pic = _form_upload(form, "profile_pic")
+    company_logo = _form_upload(form, "company_logo")
+    payload["profile_pic"] = await _save_image(profile_pic, _profile_dir()) if profile_pic else ""
+    payload["company_logo"] = await _save_image(company_logo, _logo_dir()) if company_logo else ""
 
-    if company_logo and company_logo.filename:
-        logo_filename = await _save_image(company_logo, _logo_dir())
-
-    payload = {
-        "cn": cn, "name": name.strip(), "phone1": phone1.strip(),
-        "profile_pic": profile_filename, "company_name": company_name,
-        "company_logo": logo_filename, "company_type": company_type,
-        "group": group, "email": email, "company_address": company_address,
-        "phone2": phone2, "phone3": phone3, "designation": designation,
-    }
     d = await _db(_add_sync, payload)
     return {"result": "success", "data": d}
 
@@ -820,36 +843,21 @@ def _edit_sync(conn: sqlite3.Connection, record_id: int, payload: dict,
 @router.post("/global/{record_id}/edit", response_class=JSONResponse)
 async def global_dir_edit(
     record_id: int,
+    request: Request,
     session: dict = Depends(require_session),
-    cn: str = Form(""),
-    name: str = Form(""),
-    phone1: str = Form(""),
-    company_name: str = Form(""),
-    company_type: str = Form(""),
-    group: str = Form(""),
-    email: str = Form(""),
-    company_address: str = Form(""),
-    phone2: str = Form(""),
-    phone3: str = Form(""),
-    designation: str = Form(""),
-    profile_pic: Optional[UploadFile] = File(None),
-    company_logo: Optional[UploadFile] = File(None),
 ):
-    _validate_name_phone(name, phone1)
+    """Accept SPA multipart. Filename strings for profile_pic/company_logo are
+    ignored (keep existing images); only a real File replaces them.
+    """
+    form = await request.form()
+    payload = _entry_payload_from_form(form)
+    _validate_name_phone(payload["name"], payload["phone1"])
 
-    new_profile = None
-    new_logo = None
-    if profile_pic and profile_pic.filename:
-        new_profile = await _save_image(profile_pic, _profile_dir())
-    if company_logo and company_logo.filename:
-        new_logo = await _save_image(company_logo, _logo_dir())
+    profile_pic = _form_upload(form, "profile_pic")
+    company_logo = _form_upload(form, "company_logo")
+    new_profile = await _save_image(profile_pic, _profile_dir()) if profile_pic else None
+    new_logo = await _save_image(company_logo, _logo_dir()) if company_logo else None
 
-    payload = {
-        "cn": cn, "name": name.strip(), "phone1": phone1.strip(),
-        "company_name": company_name, "company_type": company_type,
-        "group": group, "email": email, "company_address": company_address,
-        "phone2": phone2, "phone3": phone3, "designation": designation,
-    }
     d = await _db(_edit_sync, record_id, payload, new_profile, new_logo)
     if not d:
         raise HTTPException(status_code=404, detail="Directory entry not found")
