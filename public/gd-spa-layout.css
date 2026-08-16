@@ -1,0 +1,189 @@
+/* Global Directory layout controls — injected into the green SPA list view */
+#gd-spa-layout {
+  margin: 12px 0 16px;
+  padding: 14px 16px 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  color: #1f2937;
+  font-size: 14px;
+}
+#gd-spa-layout .gd-count {
+  font-size: 15px;
+  font-weight: 650;
+  margin: 0 0 12px;
+}
+#gd-spa-layout .gd-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+#gd-spa-layout .gd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#gd-spa-layout .gd-field label,
+#gd-spa-layout .gd-lbl {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  color: #6b7280;
+  font-weight: 600;
+}
+#gd-spa-layout .gd-pagesize {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+#gd-spa-layout select {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  background: #fff;
+}
+#gd-spa-layout .gd-section {
+  padding: 12px 0;
+  border-top: 1px solid #e5e7eb;
+}
+#gd-spa-layout .gd-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+#gd-spa-layout .gd-hint {
+  font-size: 12px;
+  color: #6b7280;
+  margin: 0 0 10px;
+}
+#gd-spa-layout .gd-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 4px 12px;
+}
+#gd-spa-layout .gd-grid label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+#gd-spa-layout .gd-grid input {
+  width: auto;
+  accent-color: #1f7a3f;
+}
+#gd-spa-layout .gd-sort-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+#gd-spa-layout .gd-btn {
+  appearance: none;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #1f2937;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 13px;
+}
+#gd-spa-layout .gd-btn:hover { background: #f3f4f6; }
+#gd-spa-layout .gd-btn:disabled { opacity: .45; cursor: not-allowed; }
+#gd-spa-layout .gd-btn.primary {
+  background: #1f7a3f;
+  border-color: #1f7a3f;
+  color: #fff;
+}
+#gd-spa-layout .gd-btn.primary:hover { background: #196534; }
+#gd-spa-layout .gd-btn.danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #fff;
+}
+#gd-spa-layout .gd-table-wrap { overflow: auto; margin-top: 8px; }
+#gd-spa-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+#gd-spa-table th {
+  text-align: left;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #6b7280;
+  padding: 10px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
+}
+#gd-spa-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  vertical-align: middle;
+}
+#gd-spa-table .gd-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+#gd-spa-table .gd-av {
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: #e5e7eb;
+  flex: 0 0 36px;
+}
+#gd-spa-table .gd-av.initials {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1f7a3f;
+  background: #dcfce7;
+}
+#gd-spa-table .gd-nm { font-weight: 650; }
+#gd-spa-table .gd-sub { font-size: 12px; color: #6b7280; }
+#gd-spa-table .gd-thumb {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #e5e7eb;
+}
+#gd-spa-table .gd-noimg { color: #9ca3af; font-size: 12px; }
+#gd-spa-table .gd-actions { display: flex; gap: 6px; }
+#gd-spa-layout .gd-pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0 4px;
+}
+#gd-spa-layout .gd-empty {
+  padding: 24px 8px;
+  color: #6b7280;
+  text-align: center;
+}
+#gd-spa-layout .gd-empty.hidden { display: none; }
+body.gd-layout-on table:not(#gd-spa-table) { display: none !important; }
+img.gd-file-preview {
+  display: block;
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  margin-top: 8px;
+}
+img.gd-file-preview.hidden { display: none; }
