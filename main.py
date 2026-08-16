@@ -53,21 +53,21 @@ from routers import directory as directory_router
 from routers import maintenance as maintenance_router
 from button_colors import router as button_colors_router
 
-# ── Environment ───────────────────────────────────────────────────────
+# ── Environment ───────────────────────────────────────────────────────────────
 
 DEV_MODE = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
 DUMMY_LOGIN = os.environ.get("DUMMY_LOGIN", "").lower() in ("1", "true", "yes")
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-please")
 # APP_VERSION imported from session.py
 
-# ── Logging ─────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────────
 # LOG_LEVEL=DEBUG  for full wire-protocol traces and request timing
 # LOG_LEVEL=INFO   for login/logout events (default)
 # LOG_FILE=/var/log/webadmin/app.log to persist to disk
 
 setup_logging()
 
-# ── Background tasks ──────────────────────────────────────────
+# ── Background tasks ──────────────────────────────────────────────────────────
 
 async def _cleanup_temp_files() -> None:
     """Delete log ZIP archives older than 1 hour — runs every hour."""
@@ -85,7 +85,7 @@ async def _cleanup_temp_files() -> None:
                 except OSError:
                     pass
 
-# ── Lifespan ──────────────────────────────────────────────────
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -96,7 +96,7 @@ async def lifespan(app: FastAPI):
     await db_module.close_pool()
     logger.info("WebAdmin stopped")
 
-# ── App setup ─────────────────────────────────────────────────
+# ── App setup ─────────────────────────────────────────────────────────────────
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -178,7 +178,7 @@ app.include_router(maintenance_router.router)
 app.include_router(button_colors_router)
 
 
-# ── Exception handlers ────────────────────────────────────────
+# ── Exception handlers ────────────────────────────────────────────────────────
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
@@ -203,7 +203,7 @@ async def backend_error_handler(request: Request, exc: atp_client.AtpBackendErro
     return JSONResponse({"detail": str(exc)}, status_code=502)
 
 
-# ── Routes ────────────────────────────────────────────────────
+# ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def root():
@@ -416,7 +416,7 @@ async def health():
     return status
 
 
-# ── React SPA: static assets + catch-all ─────────────────────────────────
+# ── React SPA: static assets + catch-all ─────────────────────────────────────
 # Registered LAST so every API route defined above takes priority.
 # The /assets mount serves Vite's hashed JS/CSS bundles (immutable, long cache).
 # The catch-all serves index.html for every other path (react-router handles routing).
