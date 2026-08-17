@@ -384,6 +384,115 @@
     });
   }
 
+  function toast(msg) {
+    var el = document.getElementById("gd-import-toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "gd-import-toast";
+      document.body.appendChild(el);
+    }
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function () { el.classList.remove("show"); }, 4200);
+  }
+
+  function checkImageFile(file) {
+    return new Promise(function (resolve) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var img = new Image();
+        img.onload = function () {
+          if (img.width > 500 || img.height > 500) {
+            window.alert("Image too large");
+            resolve(false);
+          } else resolve(true);
+        };
+        img.onerror = function () { resolve(false); };
+        img.src = reader.result;
+      };
+      reader.onerror = function () { resolve(false); };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadImages(files, url) {
+    if (!files.length) return;
+    for (var i = 0; i < files.length; i++) {
+      var ok = await checkImageFile(files[i]);
+      if (!ok) return;
+    }
+    var fd = new FormData();
+    for (var j = 0; j < files.length; j++) fd.append("files", files[j]);
+    var res = await fetch(url, { method: "POST", credentials: "include", body: fd });
+    if (res.status === 401) { window.location.href = "/login"; return; }
+    var data = {};
+    try { data = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      var detail = data && data.detail;
+      toast(typeof detail === "string" ? detail : "Upload failed");
+      return;
+    }
+    toast("Uploaded " + (data.uploaded || 0) + " file(s)" + (data.failed ? (", " + data.failed + " failed") : ""));
+    var root = document.getElementById(ROOT_ID);
+    if (root) loadRows(root);
+  }
+
+  function hookImportButtons() {
+    if (!isList()) return;
+    if (document.getElementById("gd-import-profiles")) return;
+    var importCsv = null;
+    var nodes = document.querySelectorAll("button, a");
+    for (var i = 0; i < nodes.length; i++) {
+      if (/^\s*Import CSV\s*$/i.test((nodes[i].textContent || "").replace(/\s+/g, " "))) {
+        importCsv = nodes[i];
+        break;
+      }
+    }
+    if (!importCsv || !importCsv.parentElement) return;
+
+    var wrap = document.createElement("span");
+    wrap.id = "gd-import-images";
+    function mkBtn(id, label) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.id = id;
+      b.className = "gd-import-btn";
+      b.textContent = label;
+      return b;
+    }
+    function mkFile(id) {
+      var inp = document.createElement("input");
+      inp.type = "file";
+      inp.accept = "image/*";
+      inp.multiple = true;
+      inp.className = "gd-hidden-file";
+      inp.id = id;
+      return inp;
+    }
+    var btnP = mkBtn("gd-import-profiles", "Import Profile Pics");
+    var btnL = mkBtn("gd-import-logos", "Import Logos");
+    var inP = mkFile("gd-file-profiles");
+    var inL = mkFile("gd-file-logos");
+    wrap.appendChild(btnP);
+    wrap.appendChild(btnL);
+    wrap.appendChild(inP);
+    wrap.appendChild(inL);
+    importCsv.parentElement.insertBefore(wrap, importCsv.nextSibling);
+    btnP.addEventListener("click", function () { inP.click(); });
+    btnL.addEventListener("click", function () { inL.click(); });
+    inP.addEventListener("change", function () {
+      var files = Array.prototype.slice.call(inP.files || []);
+      inP.value = "";
+      uploadImages(files, "/directory/global/upload-profile-images");
+    });
+    inL.addEventListener("change", function () {
+      var files = Array.prototype.slice.call(inL.files || []);
+      inL.value = "";
+      uploadImages(files, "/directory/global/upload-company-logos");
+    });
+  }
+
   function enhanceForms() {
     if (!isForm() && !isList()) return;
     document.querySelectorAll('input[type="file"]').forEach(hookFilePreview);
@@ -397,6 +506,7 @@
       if (!isList()) teardown();
     }
     mount();
+    hookImportButtons();
     enhanceForms();
   }
 
