@@ -221,8 +221,10 @@
         var id = Number(inp.dataset.id);
         if (inp.checked) state.selected[id] = true;
         else delete state.selected[id];
+        syncSelBtn(root);
       });
     });
+    syncSelBtn(root);
     tbody.querySelectorAll(".gd-edit").forEach(function (btn) {
       btn.addEventListener("click", function () {
         window.location.href = "/global-directory/" + btn.dataset.id + "/edit";
@@ -233,8 +235,34 @@
     });
   }
 
+  function contactName(id) {
+    var row = state.rows.filter(function (r) { return Number(r.id) === Number(id); })[0];
+    var n = row && row.name != null ? String(row.name).trim() : "";
+    return n || "this";
+  }
+
+  function selectedIds() {
+    return Object.keys(state.selected).map(Number).filter(function (id) { return state.selected[id]; });
+  }
+
+  function syncSelBtn(root) {
+    var btn = root.querySelector("#gd-del-sel");
+    if (!btn) return;
+    var n = selectedIds().length;
+    btn.disabled = n === 0;
+    btn.textContent = n > 0 ? ("Delete selected (" + n + ")") : "Delete selected";
+  }
+
+  function selectedConfirm() {
+    var ids = selectedIds();
+    var names = ids.map(contactName).filter(function (n) { return n && n !== "this"; });
+    if (ids.length === 1) return "Delete " + contactName(ids[0]) + " contact";
+    if (names.length === 2) return "Delete " + names[0] + " and " + names[1] + " contacts";
+    return "Delete " + ids.length + " selected contacts";
+  }
+
   async function deleteOne(id, root) {
-    if (!window.confirm("Delete this contact?")) return;
+    if (!window.confirm("Delete " + contactName(id) + " contact")) return;
     var res = await fetch("/directory/global/" + id + "/delete", {
       method: "POST",
       credentials: "include"
@@ -242,6 +270,22 @@
     if (res.status === 401) { window.location.href = "/login"; return; }
     if (!res.ok) { window.alert("Failed to delete entry"); return; }
     delete state.selected[id];
+    await loadRows(root);
+  }
+
+  async function deleteSelected(root) {
+    var ids = selectedIds();
+    if (!ids.length) return;
+    if (!window.confirm(selectedConfirm())) return;
+    var res = await fetch("/directory/global/delete-multiple", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: ids })
+    });
+    if (res.status === 401) { window.location.href = "/login"; return; }
+    if (!res.ok) { window.alert("Failed to delete entries"); return; }
+    ids.forEach(function (id) { delete state.selected[id]; });
     await loadRows(root);
   }
 
@@ -293,6 +337,7 @@
           '<span class="gd-lbl">Direction</span>' +
           '<select id="gd-sort-dir"><option value="asc">asc</option><option value="desc">desc</option></select>' +
           '<button type="button" class="gd-btn" id="gd-reload">Reload</button>' +
+          '<button type="button" class="gd-btn danger" id="gd-del-sel" disabled>Delete selected</button>' +
         "</div></div>" +
       '<div class="gd-table-wrap"><table id="gd-spa-table"><thead><tr id="gd-thead"></tr></thead><tbody id="gd-tbody"></tbody></table></div>' +
       '<div class="gd-empty hidden" id="gd-empty">No contacts to display.</div>' +
@@ -314,6 +359,7 @@
       renderTable(root);
     });
     root.querySelector("#gd-reload").addEventListener("click", function () { loadRows(root); });
+    root.querySelector("#gd-del-sel").addEventListener("click", function () { deleteSelected(root); });
     root.querySelector("#gd-prev").addEventListener("click", function () {
       state.page -= 1;
       renderTable(root);
@@ -327,6 +373,12 @@
   function findAnchor() {
     var search = document.querySelector('input[placeholder*="Search" i], input[type="search"]');
     if (search) {
+      var box = search.closest("div");
+      while (box && box.parentElement && box.parentElement.querySelector("table")) {
+        if (box.parentElement.querySelector(":scope > table, :scope > div > table")) break;
+        box = box.parentElement;
+        if (box === document.body) break;
+      }
       return search.closest("div") || search.parentElement;
     }
     var table = document.querySelector("table");
@@ -383,6 +435,7 @@
       reader.readAsDataURL(file);
     });
   }
+
 
   function toast(msg) {
     var el = document.getElementById("gd-import-toast");
