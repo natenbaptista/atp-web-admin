@@ -748,8 +748,14 @@
     }
   }
 
+  function contactName(id) {
+    var row = (state.rows || []).filter(function (r) { return Number(r.id) === Number(id); })[0];
+    var n = row && row.name != null ? String(row.name).trim() : "";
+    return n || "this";
+  }
+
   async function deleteOne(id) {
-    if (!confirm("Delete this contact?")) return;
+    if (!confirm("Delete " + contactName(id) + " contact")) return;
     try {
       await apiJson("/directory/global/" + id + "/delete", { method: "POST" });
       state.selected.delete(id);
