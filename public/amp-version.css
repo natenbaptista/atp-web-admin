@@ -7,4 +7,5 @@
   margin-top: 2px;
   opacity: 0.85;
   white-space: nowrap;
+  color: rgba(255, 255, 255, 0.82) !important;
 }
