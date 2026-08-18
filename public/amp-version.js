@@ -75,7 +75,7 @@
     for (var i = 0; i < list.length; i++) {
       var el = list[i];
       if (el.children && el.children.length) continue;
-      if ((el.textContent || "").trim() === "Admin") return el;
+      if ((el.textContent || "").trim().toLowerCase() === "admin") return el;
     }
     return null;
   }
