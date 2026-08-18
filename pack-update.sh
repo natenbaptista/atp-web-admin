@@ -61,6 +61,23 @@ else
   tar -C "$SCRIPT_DIR" "${EXCL[@]}" -cf - . | tar -C "$STAGE/$NAME" -xf -
 fi
 
+# Bump Web version in the staged tree only so a USB pack increments
+# independently of AMP. The source checkout is left unchanged (safer
+# than rewriting the git-tracked amp_web_version before rsync).
+STAGE_VER="$STAGE/$NAME/amp_web_version"
+if [[ -f "$STAGE_VER" ]]; then
+  cur="$(tr -cd '0-9' < "$STAGE_VER")"
+  if [[ -n "$cur" ]]; then
+    next=$((10#$cur + 1))
+    printf '%s\n' "$next" > "$STAGE_VER"
+    info "Staged amp_web_version: $cur → $next"
+  else
+    info "amp_web_version has no integer; copied as-is"
+  fi
+else
+  info "amp_web_version missing; pack will not bump Web version"
+fi
+
 # Do not ship leftover patch helpers; the packed files are already applied.
 rm -f "$STAGE/$NAME/button-colors.patch" \
       "$STAGE/$NAME/patch_frontend_colors.py" \
@@ -83,6 +100,7 @@ Check
   Lines search: type 24, table shows 2400...
   Line dropdown: appearances like 6000--1 / 6000--2
   GET /button-colors returns the colour list
+  Sidebar footer: AMP vX.Y.Z plus Web v N (from amp_web_version)
 TXT
 
 chmod +x "$STAGE/$NAME/update.sh" "$STAGE/$NAME/install.sh" 2>/dev/null || true

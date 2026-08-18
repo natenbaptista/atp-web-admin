@@ -26,7 +26,7 @@ import db as db_module
 from logging_config import setup_logging, logger
 from session import (
     SESSION_COOKIE, cookie_flags, make_session, read_session, get_session, require_session,
-    APP_VERSION, INSTANCE_NAME,
+    APP_VERSION, INSTANCE_NAME, WEB_VERSION,
 )
 from routers import dashboard as dashboard_router
 from routers import users as users_router
@@ -301,6 +301,7 @@ async def login_post(request: Request):
             "guid":          user.get("guid", ""),
             "email":         user.get("email", ""),
             "app_version":   APP_VERSION,
+            "web_version":   WEB_VERSION,
             "instance_name": instance_name,
         })
         response.set_cookie(SESSION_COOKIE, make_session(user), **flags)
@@ -399,7 +400,7 @@ async def session_check(session: Optional[dict] = Depends(get_session)):
 async def health():
     """Liveness check — also probes the backend socket."""
     instance_name = INSTANCE_NAME
-    status = {"app": "ok", "version": APP_VERSION, "instance_name": instance_name, "backend": "not configured"}
+    status = {"app": "ok", "version": APP_VERSION, "web_version": WEB_VERSION, "instance_name": instance_name, "backend": "not configured"}
     if os.environ.get("ATPMGR_DATADIR"):
         try:
             reply = await atp_client.request("controller_echo")

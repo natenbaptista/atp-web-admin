@@ -1,0 +1,26 @@
+/* Button editor Line dropdown typeahead — /users/*/buttons */
+.blt-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.blt-search {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  background: #fff;
+  color: #111827;
+}
+.blt-search:focus {
+  outline: 2px solid #86efac;
+  border-color: #1f7a3f;
+}
+[role="listbox"] .blt-search {
+  margin: 6px 6px 4px;
+  width: calc(100% - 12px);
+}

@@ -6,12 +6,13 @@ All session state lives in a signed cookie (itsdangerous).
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 
 from fastapi import Cookie, HTTPException, Request
 from itsdangerous import URLSafeTimedSerializer
 
-# ── Config (mirrors main.py env vars) ────────────────────────────────────────
+# ── Config (mirrors main.py env vars) ────────────────────────────────
 
 DEV_MODE = os.environ.get("DEV_MODE", "").lower() in ("1", "true", "yes")
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-please")
@@ -46,13 +47,25 @@ def _read_app_version() -> str:
 
 APP_VERSION = _read_app_version()
 
+
+def _read_web_version() -> str:
+    """Read amp_web_version next to this file. Independent of AMP / APP_VERSION."""
+    path = Path(__file__).parent / "amp_web_version"
+    try:
+        return path.read_text(encoding="utf-8").strip() or "0"
+    except OSError:
+        return "0"
+
+
+WEB_VERSION = _read_web_version()
+
 SESSION_COOKIE = "atp_session"
 SESSION_MAX_AGE_SECONDS = 8 * 60 * 60  # 8 hours
 
 _signer = URLSafeTimedSerializer(SECRET_KEY, salt="atp-session")
 
 
-# ── Cookie flags ──────────────────────────────────────────────────────────────
+# ── Cookie flags ──────────────────────────────────────────
 
 def cookie_flags() -> dict:
     return {
@@ -62,7 +75,7 @@ def cookie_flags() -> dict:
     }
 
 
-# ── Session encode / decode ───────────────────────────────────────────────────
+# ── Session encode / decode ─────────────────────────────────
 
 def make_session(user: dict) -> str:
     return _signer.dumps({
@@ -83,14 +96,14 @@ def read_session(raw: Optional[str]) -> Optional[dict]:
         return None
 
 
-# ── FastAPI dependency: optional session ──────────────────────────────────────
+# ── FastAPI dependency: optional session ──────────────────────
 
 def get_session(atp_session: Optional[str] = Cookie(default=None)) -> Optional[dict]:
     """Returns session dict or None. Use when unauthenticated access is allowed."""
     return read_session(atp_session)
 
 
-# ── FastAPI dependency: required session ──────────────────────────────────────
+# ── FastAPI dependency: required session ──────────────────────
 
 def require_session(atp_session: Optional[str] = Cookie(default=None)) -> dict:
     """Returns session dict or raises 401. Use in protected routes."""
@@ -100,14 +113,14 @@ def require_session(atp_session: Optional[str] = Cookie(default=None)) -> dict:
     return session
 
 
-# ── JSON vs HTML response detection ──────────────────────────────────────────
+# ── JSON vs HTML response detection ───────────────────────
 
 def wants_json(request: Request) -> bool:
     """True when the caller prefers a JSON response (React SPA via apiPost)."""
     return "application/json" in request.headers.get("accept", "")
 
 
-# ── Template context helper ───────────────────────────────────────────────────
+# ── Template context helper ───────────────────────────────
 
 def template_ctx(request: Request, session: Optional[dict], **extra) -> dict:
     """
@@ -131,6 +144,7 @@ def template_ctx(request: Request, session: Optional[dict], **extra) -> dict:
         "current_user":  session or {},
         "instance_name": INSTANCE_NAME,
         "app_version":   APP_VERSION,
+        "web_version":   WEB_VERSION,
         "csrf_token":    csrf_token,
         "csrf_cookie":   csrf_cookie,
         **extra,
