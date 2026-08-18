@@ -68,7 +68,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production-please")
 
 setup_logging()
 
-# ── Background tasks ─────────────────────────────────────────────────────────
+# ── Background tasks ──────────────────────────────────────────────────────────
 
 async def _cleanup_temp_files() -> None:
     """Delete log ZIP archives older than 1 hour — runs every hour."""
@@ -86,7 +86,7 @@ async def _cleanup_temp_files() -> None:
                 except OSError:
                     pass
 
-# ── Lifespan ─────────────────────────────────────────────────────────────────
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -97,7 +97,7 @@ async def lifespan(app: FastAPI):
     await db_module.close_pool()
     logger.info("WebAdmin stopped")
 
-# ── App setup ────────────────────────────────────────────────────────────────
+# ── App setup ─────────────────────────────────────────────────────────────────
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -179,7 +179,7 @@ app.include_router(maintenance_router.router)
 app.include_router(button_colors_router)
 
 
-# ── Exception handlers ────────────────────────────────────────────────────
+# ── Exception handlers ────────────────────────────────────────────────────────
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
