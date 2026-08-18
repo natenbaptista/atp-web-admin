@@ -74,11 +74,20 @@
     return false;
   }
 
+  function matchAmpColor(line, amp) {
+    if (!line) return;
+    var src = amp || (line.previousElementSibling);
+    if (!src || !window.getComputedStyle) return;
+    var c = window.getComputedStyle(src).color;
+    if (c) line.style.color = c;
+  }
+
   function paint(ver) {
     if (!ver) return;
     var label = "Web v " + ver;
     var existing = document.getElementById("amp-web-ver");
     if (existing) {
+      matchAmpColor(existing, existing.previousElementSibling);
       if (existing.textContent === label) return;
       if (obs) obs.disconnect();
       existing.textContent = label;
@@ -91,6 +100,7 @@
     line.id = "amp-web-ver";
     line.className = "amp-web-ver";
     line.textContent = label;
+    matchAmpColor(line, amp);
     if (obs) obs.disconnect();
     amp.parentNode.insertBefore(line, amp.nextSibling);
     if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
