@@ -16,7 +16,8 @@
 
   function isPage() {
     var p = (location.pathname || "").replace(/\/+$/, "") || "/";
-    return p === "/lines/groups" || p === "/lines/line-groups";
+    if (p === "/lines/groups" || p === "/lines/line-groups" || p === "/lines/line_group") return true;
+    return /\/lines\/.*group/.test(p);
   }
 
   function escapeHtml(s) {
@@ -124,16 +125,30 @@
   }
 
   function hideSpaEmpty() {
+    if (!document.getElementById(ROOT_ID)) return;
     var walk = document.querySelectorAll("h1, h2, h3, p, div, span, button");
     for (var i = 0; i < walk.length; i++) {
       var el = walk[i];
-      if (el.id === "lg-modal-bg" || (el.closest && (el.closest("#" + ROOT_ID) || el.closest("#lg-modal-bg")))) continue;
+      if (el.id === ROOT_ID || el.id === "lg-modal-bg") continue;
+      if (el.closest && (el.closest("#" + ROOT_ID) || el.closest("#lg-modal-bg"))) continue;
       var t = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (t === "No line groups configured" || t === "+ Add Line Group" || t === "Add Line Group") {
-        var box = el.closest("div");
-        if (box && box.id !== ROOT_ID && box.id !== "lg-modal-bg" && !(box.closest && box.closest("#lg-modal-bg"))) {
-          box.classList.add("lg-hide-spa");
-        }
+      var isEmpty = t === "No line groups configured" || t === "No line groups configured.";
+      var isAdd = t === "+ Add Line Group" || t === "Add Line Group";
+      if (!isEmpty && !isAdd) continue;
+      if (isAdd && el.tagName === "BUTTON") {
+        el.classList.add("lg-hide-spa");
+        continue;
+      }
+      var box = el;
+      for (var up = 0; up < 3 && box && box.parentElement; up++) {
+        var parent = box.parentElement;
+        if (parent.id === ROOT_ID || parent.id === "lg-modal-bg") break;
+        if (parent.querySelector && parent.querySelector("#" + ROOT_ID)) break;
+        if (parent.tagName === "MAIN" || parent.id === "root" || parent === document.body) break;
+        box = parent;
+      }
+      if (box && box.id !== ROOT_ID && !(box.querySelector && box.querySelector("#" + ROOT_ID))) {
+        box.classList.add("lg-hide-spa");
       }
     }
   }
@@ -360,7 +375,9 @@
         '<table id="lg-table"><thead><tr>' +
           "<th>Main Line</th><th>Sub Lines</th><th>Actions</th>" +
         '</tr></thead><tbody id="lg-tbody"></tbody></table></div>' +
-      '<div class="lg-empty" id="lg-empty">No line groups configured.</div>';
+      '<div class="lg-empty" id="lg-empty">' +
+        "<p>No line groups configured.</p>" +
+        '<button type="button" class="lg-btn primary" id="lg-add-empty">+ Add Line Group</button></div>';
     return el;
   }
 
@@ -407,14 +424,15 @@
   }
 
   function findAnchor() {
-    var h = null;
+    var main = document.querySelector("main") || document.getElementById("root");
     var nodes = document.querySelectorAll("h1, h2, h3");
     for (var i = 0; i < nodes.length; i++) {
       var t = (nodes[i].textContent || "").replace(/\s+/g, " ").trim();
-      if (t === "Line Groups" || t === "Lines") { h = nodes[i]; break; }
+      if (t === "Line Groups" || t === "Lines") {
+        return nodes[i].parentElement || nodes[i];
+      }
     }
-    if (h) return h.parentElement || h;
-    return document.querySelector("main") || document.getElementById("root") || document.body;
+    return main || document.body;
   }
 
   async function mount() {
@@ -425,7 +443,13 @@
     document.body.classList.add("lg-overlay-on");
     hideSpaEmpty();
     ensureModal();
-    if (document.getElementById(ROOT_ID)) return;
+    var existing = document.getElementById(ROOT_ID);
+    if (existing) {
+      var hide = existing.closest(".lg-hide-spa");
+      if (hide) hide.classList.remove("lg-hide-spa");
+      existing.style.display = "";
+      return;
+    }
     var anchor = findAnchor();
     if (!anchor) return;
     var root = buildRoot();
@@ -435,6 +459,8 @@
       document.body.appendChild(root);
     }
     root.querySelector("#lg-add").addEventListener("click", function () { openModal("add"); });
+    var addEmpty = root.querySelector("#lg-add-empty");
+    if (addEmpty) addEmpty.addEventListener("click", function () { openModal("add"); });
     if (!state.loaded) {
       await Promise.all([loadGroups(), loadLines()]);
       state.loaded = true;

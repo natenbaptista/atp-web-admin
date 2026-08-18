@@ -2,6 +2,7 @@
   "use strict";
 
   var cached = "";
+  var cachedAmp = "";
   var lastPoll = 0;
   var POLL_MS = 30000;
   var obs = null;
@@ -16,10 +17,12 @@
         var key = store.key(i);
         var raw;
         try { raw = store.getItem(key); } catch (e) { continue; }
-        if (!raw || raw.indexOf("web_version") < 0) continue;
+        if (!raw || (raw.indexOf("web_version") < 0 && raw.indexOf("app_version") < 0)) continue;
         try {
           var obj = JSON.parse(raw);
           var v = pickWeb(obj);
+          var a = pickAmp(obj);
+          if (a && !cachedAmp) cachedAmp = a;
           if (v) return v;
         } catch (e) {}
       }
@@ -41,16 +44,36 @@
     return "";
   }
 
+  function pickAmp(obj) {
+    if (!obj || typeof obj !== "object") return "";
+    var raw = obj.app_version != null ? obj.app_version : obj.version;
+    if (raw != null && String(raw).trim()) return String(raw).trim().replace(/^v/i, "");
+    var nested = [obj.user, obj.data, obj.session, obj.auth, obj.profile];
+    for (var i = 0; i < nested.length; i++) {
+      var n = nested[i];
+      if (!n) continue;
+      raw = n.app_version != null ? n.app_version : n.version;
+      if (raw != null && String(raw).trim()) return String(raw).trim().replace(/^v/i, "");
+    }
+    return "";
+  }
+
   async function fromHealth() {
     try {
       var res = await fetch("/health", { credentials: "include" });
-      if (!res.ok) return "";
+      if (!res.ok) return { web: "", amp: "" };
       var data = await res.json();
+      var web = "";
+      var amp = "";
       if (data && data.web_version != null && String(data.web_version).trim()) {
-        return String(data.web_version).trim();
+        web = String(data.web_version).trim();
       }
+      if (data && data.version != null && String(data.version).trim()) {
+        amp = String(data.version).trim().replace(/^v/i, "");
+      }
+      return { web: web, amp: amp };
     } catch (e) {}
-    return "";
+    return { web: "", amp: "" };
   }
 
   function sidebarLeaves() {
@@ -122,7 +145,19 @@
     if (web) applyFooterStyle(web, style);
   }
 
+  function paintAmp(ver) {
+    if (!ver) return;
+    var label = "v" + String(ver).replace(/^v/i, "");
+    var amp = findAmpVersionEl();
+    if (!amp) return;
+    if (amp.textContent === label) return;
+    if (obs) obs.disconnect();
+    amp.textContent = label;
+    if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
   function paint(ver) {
+    if (cachedAmp) paintAmp(cachedAmp);
     if (!ver) return;
     var label = "Web v " + ver;
     var existing = document.getElementById("amp-web-ver");
@@ -149,10 +184,11 @@
 
   async function refresh(force) {
     var ver = fromLoginPayload() || cached;
-    if (!ver || force || (Date.now() - lastPoll > POLL_MS)) {
+    if (!ver || !cachedAmp || force || (Date.now() - lastPoll > POLL_MS)) {
       lastPoll = Date.now();
       var hv = await fromHealth();
-      if (hv) ver = hv;
+      if (hv.web) ver = hv.web;
+      if (hv.amp) cachedAmp = hv.amp;
     }
     if (ver) cached = ver;
     paint(cached);
