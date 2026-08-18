@@ -13,10 +13,11 @@ Routes:
   POST /lines/{dn}/delete                 → delete line
   POST /lines/import                      → parse CSV preview / confirm import
   GET  /lines/blacklist-report            → HTML or CSV report
-  GET  /lines/line-groups                 → line group management
-  POST /lines/line-groups/add             → create line group
-  POST /lines/line-groups/{main}/edit     → update line group
-  POST /lines/line-groups/{main}/delete   → delete line group
+  GET  /lines/groups and /lines/line-groups → SPA
+  GET  /lines/groups/search and /lines/line-groups/search → JSON
+  POST /lines/groups and /lines/line-groups/add → create line group
+  POST /lines/groups/{main}/edit          → update line group
+  POST /lines/groups/{main}/delete        → delete line group
 """
 
 import asyncio
@@ -47,7 +48,6 @@ _LINE_TYPES = [
     {"value": "OPENHOOT", "label": "Open Hoot"},
 ]
 
-# Must match Line::forwarding_condition_from_string / PHP get_fwd_conditions (AtpComponent.php)
 _FORWARD_CONDITIONS = [
     {"value": "immediate_forwarding",   "label": "Forward immediately"},
     {"value": "on_no_answer",         "label": "Forward if no answer"},
@@ -55,7 +55,6 @@ _FORWARD_CONDITIONS = [
     {"value": "on_no_answer_or_busy", "label": "Forward if no answer or busy"},
 ]
 
-# Legacy Jinja options from an earlier port (map to C++ enums)
 _FWD_LEGACY = {
     "always": "immediate_forwarding",
     "busy": "on_busy",
@@ -64,14 +63,173 @@ _FWD_LEGACY = {
 }
 
 
-# ── Index ─────────────────────────────────────────────────────────────────
+def _group_main(g) -> str:
+    if not isinstance(g, dict):
+        return ""
+    return str(g.get("main_line") or g.get("main") or g.get("name") or "").strip()
+
+
+def _group_subs(g) -> list:
+    if not isinstance(g, dict):
+        return []
+    raw = g.get("sub_lines") if g.get("sub_lines") is not None else (
+        g.get("subs") if g.get("subs") is not None else g.get("lines", [])
+    )
+    if isinstance(raw, str):
+        return [s.strip() for s in raw.split(",") if s.strip()]
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw:
+        if isinstance(item, dict):
+            val = item.get("name") or item.get("dn") or item.get("line") or item.get("linename")
+            if val:
+                out.append(str(val).strip())
+        elif item is not None and str(item).strip():
+            out.append(str(item).strip())
+    return out
+
+
+def _prefers_json(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    ctype = request.headers.get("content-type", "")
+    return "application/json" in accept.lower() or "application/json" in ctype.lower()
+
+
+async def _read_group_body(request: Request, main_fallback: str = "") -> tuple:
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        main = str(body.get("main_line") or body.get("main") or main_fallback or "").strip()
+        subs = body.get("sub_lines")
+        if subs is None:
+            subs = body.get("sub_lines[]")
+        if subs is None:
+            subs = body.get("subs")
+        if subs is None:
+            subs = []
+        if isinstance(subs, str):
+            subs = [s.strip() for s in subs.split(",") if s.strip()]
+        elif isinstance(subs, list):
+            subs = [str(s).strip() for s in subs if str(s).strip()]
+        else:
+            subs = []
+        return main, subs
+    form = await request.form()
+    main = str(form.get("main_line") or form.get("main") or main_fallback or "").strip()
+    subs = form.getlist("sub_lines") or form.getlist("sub_lines[]") or form.getlist("subs")
+    return main, [str(s).strip() for s in subs if str(s).strip()]
+
+
+async def _validate_nesting(main: str, subs: list, *, editing: bool = False):
+    if not main:
+        return JSONResponse({"result": "fail", "detail": "Main line is required."}, status_code=422)
+    try:
+        groups = await atp_client.line_group_search()
+    except atp_client.AtpBackendError as exc:
+        return JSONResponse({"result": "fail", "detail": str(exc)}, status_code=502)
+    if not isinstance(groups, list):
+        groups = []
+    mains = set()
+    all_subs = set()
+    for g in groups:
+        gm = _group_main(g)
+        if gm:
+            mains.add(gm)
+        for s in _group_subs(g):
+            all_subs.add(s)
+    if main in all_subs:
+        return JSONResponse(
+            {"result": "fail", "detail": f"Line {main} is already a sub-line and cannot be used as a main line."},
+            status_code=422,
+        )
+    if not editing and main in mains:
+        return JSONResponse(
+            {"result": "fail", "detail": f"Line {main} is already a main line of another group."},
+            status_code=422,
+        )
+    other_mains = {m for m in mains if m != main}
+    nested = [s for s in subs if s in other_mains]
+    if nested:
+        return JSONResponse(
+            {"result": "fail", "detail": f"Cannot nest groups: {', '.join(nested)} is a main line of another group."},
+            status_code=422,
+        )
+    if main in subs:
+        return JSONResponse(
+            {"result": "fail", "detail": "A main line cannot also be listed as a sub-line."},
+            status_code=422,
+        )
+    return None
+
+
+async def _groups_payload() -> list:
+    try:
+        groups = await atp_client.line_group_search()
+    except atp_client.AtpBackendError:
+        groups = []
+    return groups if isinstance(groups, list) else []
+
+
+async def _lg_add(request: Request, session: dict, json_always: bool):
+    main_line, sub_lines = await _read_group_body(request)
+    err = await _validate_nesting(main_line, sub_lines, editing=False)
+    if err:
+        return err
+    try:
+        await atp_client.line_group_create({"main_line": main_line, "sub_lines": sub_lines})
+        logger.info("Line group created: main=%r by %r", main_line, session.get("username"))
+    except atp_client.AtpBackendError as exc:
+        logger.error("Line group create failed: %s", exc)
+        return JSONResponse({"result": "fail", "detail": str(exc)}, status_code=502)
+    if json_always or _prefers_json(request):
+        return JSONResponse({"result": "success", "data": {"main_line": main_line, "sub_lines": sub_lines}})
+    return RedirectResponse(url="/lines/line-groups", status_code=303)
+
+
+async def _lg_edit(main_line: str, request: Request, session: dict, json_always: bool):
+    body_main, sub_lines = await _read_group_body(request, main_fallback=main_line)
+    main_line = (main_line or body_main).strip()
+    err = await _validate_nesting(main_line, sub_lines, editing=True)
+    if err:
+        return err
+    try:
+        await atp_client.line_group_update({"main_line": main_line, "sub_lines": sub_lines})
+        logger.info("Line group updated: main=%r by %r", main_line, session.get("username"))
+    except atp_client.AtpBackendError as exc:
+        logger.error("Line group update failed: %s", exc)
+        return JSONResponse({"result": "fail", "detail": str(exc)}, status_code=502)
+    if json_always or _prefers_json(request):
+        return JSONResponse({"result": "success", "data": {"main_line": main_line, "sub_lines": sub_lines}})
+    return RedirectResponse(url="/lines/line-groups", status_code=303)
+
+
+async def _lg_delete(main_line: str, request: Request, session: dict, json_always: bool):
+    if not main_line:
+        body_main, _ = await _read_group_body(request)
+        main_line = body_main
+    if not main_line:
+        return JSONResponse({"result": "fail", "detail": "Main line is required."}, status_code=422)
+    try:
+        await atp_client.line_group_delete(main_line)
+        logger.info("Line group deleted: main=%r by %r", main_line, session.get("username"))
+    except atp_client.AtpBackendError as exc:
+        logger.error("Line group delete failed: %s", exc)
+        return JSONResponse({"result": "fail", "detail": str(exc)}, status_code=502)
+    if json_always or _prefers_json(request):
+        return JSONResponse({"result": "success", "data": {"main_line": main_line}})
+    return RedirectResponse(url="/lines/line-groups", status_code=303)
+
 
 @router.get("")
 async def lines_index():
     return FileResponse(PUBLIC_DIR / "index.html")
 
-
-# ── AJAX search ───────────────────────────────────────────────────────────
 
 @router.get("/search", response_class=JSONResponse)
 async def lines_search(
@@ -82,8 +240,6 @@ async def lines_search(
 ):
     per_page = max(1, min(per_page, 200))
     page = max(1, page)
-    # ATP line_search(q) is exact linename when fuzzy_search=0, so "24" misses 2400.
-    # List all, then prefix-filter the LINE NAME column (dn / name / linename).
     raw = await _safe_line_search("")
     qn = (q or "").strip()
     if qn:
@@ -106,24 +262,11 @@ async def lines_search(
     }
 
 
-# ── All line names (for button config dropdown) ────────────────────────────
-
 @router.get("/names", response_class=JSONResponse)
 async def lines_names(
     username: Optional[str] = None,
     session: dict = Depends(require_session),
 ):
-    """Return virtual_line names with their types for the button config Line dropdown.
-
-    If `username` is provided, returns only lines that user has an appearance on
-    (mirrors PHP LineManager::find_lines_for_username).
-    Otherwise returns all lines.
-
-    Returns [{name, type}] so the frontend can filter by button type client-side
-    (mirrors PHP get_lines_for_type intersection per button type).
-
-    Queries config.sqlite: line_appearances → virtual_lines → lines (for type).
-    """
     datadir = os.environ.get("ATPMGR_DATADIR", "")
     if not datadir:
         return []
@@ -131,8 +274,6 @@ async def lines_names(
     try:
         con = sqlite3.connect(db_path)
         if username:
-            # User's lines with their types — mirrors PHP find_lines_for_username
-            # joined with lines table to get line type (Line/ARD/MRD/OPENHOOT)
             rows = con.execute(
                 "SELECT DISTINCT vl.name, COALESCE(l.type, 'Line') as line_type"
                 " FROM line_appearances la"
@@ -163,8 +304,6 @@ async def lines_names(
         return []
 
 
-# ── Validate line name (real-time, mirrors PHP LinesController::validate_line) ─
-
 @router.post("/validate-name", response_class=JSONResponse)
 async def lines_validate_name(
     request: Request,
@@ -172,23 +311,18 @@ async def lines_validate_name(
 ):
     body = await request.json()
     name = (body.get("name") or "").strip()
-
     if not name:
         return {"error": "Line Name is required"}
-
     import re as _re
     if not _re.match(r"^[A-Za-z0-9\S]+$", name):
         return {"error": "No spaces allowed"}
-
-    # Check for duplicate: if a line with this name already exists, reject it
     try:
         results = await atp_client.line_search(name)
         for line in results:
             if (line.get("name") or line.get("dn") or "").lower() == name.lower():
                 return {"error": f'Line "{name}" already exists.'}
     except atp_client.AtpBackendError:
-        pass  # can't confirm uniqueness, proceed to backend validate
-
+        pass
     try:
         msg = await atp_client.line_validate({
             "name": name,
@@ -201,11 +335,8 @@ async def lines_validate_name(
     except atp_client.AtpBackendError as exc:
         logger.warning("line_validate backend error: %s", exc)
         return {"valid": True}
-
     return {"valid": True}
 
-
-# ── Add ───────────────────────────────────────────────────────────────
 
 @router.get("/add")
 async def lines_add_form():
@@ -220,12 +351,9 @@ async def lines_add_post(
     form = await request.form()
     data = dict(form)
     errors = _validate_line_form(data, is_add=True)
-
     new_users = form.getlist("online_users")
     if errors:
         return JSONResponse({"errors": errors}, status_code=422)
-
-    # Check for duplicate line name before calling create
     line_name = (data.get("dn") or "").strip()
     if line_name:
         try:
@@ -238,15 +366,12 @@ async def lines_add_post(
                     )
         except atp_client.AtpBackendError:
             pass
-
     try:
         await atp_client.line_create(_form_to_payload(data, form, session))
         logger.info("Line created: %r by %r", data.get("dn"), session.get("username"))
     except atp_client.AtpBackendError as exc:
         logger.error("Line create failed: %s", exc)
         return JSONResponse({"error": str(exc)}, status_code=502)
-
-    # Assign user appearances on the newly created line
     line_dn = (data.get("dn") or "").strip()
     if line_dn and new_users:
         import asyncio as _asyncio
@@ -254,30 +379,15 @@ async def lines_add_post(
             await _asyncio.gather(*[atp_client.line_add_appearance(line_dn, u) for u in new_users])
         except atp_client.AtpBackendError as exc:
             logger.warning("User appearance add failed for new line %r: %s", line_dn, exc)
-
     return JSONResponse({"ok": True})
 
-
-# ── Import ────────────────────────────────────────────────────────────
-# NOTE: must be registered BEFORE /{dn}/edit so FastAPI matches literal "import" first.
 
 @router.post("/import", response_class=JSONResponse)
 async def lines_import(
     request: Request,
     session: dict = Depends(require_session),
 ):
-    """
-    Two-phase line CSV import (mirrors UsersController::import pattern).
-
-    Phase 1 — multipart/form-data with field 'file':
-        Parse CSV, return preview list.
-        CSV columns: Line Name, Type, Line Description, Capacity
-
-    Phase 2 — JSON body {lines: [...], confirm: true}:
-        Create each line via ATP backend.
-    """
     content_type = request.headers.get("content-type", "")
-
     if "multipart" in content_type:
         form    = await request.form()
         upload  = form.get("file")
@@ -298,19 +408,15 @@ async def lines_import(
                     "description": description, "capacity": capacity,
                 })
         return {"lines": preview, "count": len(preview)}
-
-    # Phase 2: JSON confirm
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "Invalid JSON."}, status_code=400)
-
     lines_to_create = body.get("lines", [])
     if not lines_to_create:
         return JSONResponse({"error": "No lines to import."}, status_code=400)
-
     created = 0
-    errors: list[str] = []
+    errors: list = []
     for row in lines_to_create:
         name        = (row.get("name") or "").strip()
         line_type   = (row.get("type") or "Line").strip()
@@ -327,7 +433,6 @@ async def lines_import(
             created += 1
         except atp_client.AtpBackendError as exc:
             errors.append(f"{name}: {exc}")
-
     logger.info("Lines imported: %d by %r", created, session.get("username"))
     return {
         "success": True,
@@ -337,14 +442,54 @@ async def lines_import(
     }
 
 
-# ── Detail (full config for edit form) ─────────────────────────────────────
+# Line groups — registered BEFORE /{dn} routes
+@router.get("/groups/search", response_class=JSONResponse)
+@router.get("/line-groups/search", response_class=JSONResponse)
+async def line_groups_search_json(session: dict = Depends(require_session)):
+    return await _groups_payload()
+
+
+@router.get("/groups")
+@router.get("/line-groups")
+async def line_groups_index():
+    return FileResponse(PUBLIC_DIR / "index.html")
+
+
+@router.post("/groups")
+async def line_groups_alias_add(request: Request, session: dict = Depends(require_session)):
+    return await _lg_add(request, session, True)
+
+
+@router.post("/groups/{main_line}/edit")
+async def line_groups_alias_edit(main_line: str, request: Request, session: dict = Depends(require_session)):
+    return await _lg_edit(main_line, request, session, True)
+
+
+@router.post("/groups/{main_line}/delete")
+async def line_groups_alias_delete(main_line: str, request: Request, session: dict = Depends(require_session)):
+    return await _lg_delete(main_line, request, session, True)
+
+
+@router.post("/line-groups/add")
+async def line_groups_add(request: Request, session: dict = Depends(require_session)):
+    return await _lg_add(request, session, False)
+
+
+@router.post("/line-groups/{main_line}/edit")
+async def line_groups_edit(main_line: str, request: Request, session: dict = Depends(require_session)):
+    return await _lg_edit(main_line, request, session, False)
+
+
+@router.post("/line-groups/{main_line}/delete")
+async def line_groups_delete(main_line: str, request: Request, session: dict = Depends(require_session)):
+    return await _lg_delete(main_line, request, session, False)
+
 
 @router.get("/{dn}/detail", response_class=JSONResponse)
 async def lines_detail(
     dn: str,
     session: dict = Depends(require_session),
 ):
-    """Return full line config for a single DN — used by the edit form."""
     try:
         line = await atp_client.line_get(dn)
     except atp_client.AtpBackendError as exc:
@@ -352,27 +497,21 @@ async def lines_detail(
         return JSONResponse({"error": str(exc)}, status_code=502)
     if not line:
         return JSONResponse({"error": f"Line {dn!r} not found"}, status_code=404)
-    # Ensure dn field is always present
     if not line.get("dn"):
         line["dn"] = dn
     return line
 
-
-# ── Users on a line ───────────────────────────────────────────
 
 @router.get("/{dn}/users", response_class=JSONResponse)
 async def lines_users_on_line(
     dn: str,
     session: dict = Depends(require_session),
 ):
-    """Return list of usernames that currently have this line."""
     try:
         return await atp_client.line_usernames_on_line(dn)
     except atp_client.AtpBackendError:
         return []
 
-
-# ── Edit ──────────────────────────────────────────────────────────────
 
 @router.get("/{dn}/edit")
 async def lines_edit_form():
@@ -390,18 +529,14 @@ async def lines_edit_post(
     data["dn"] = dn
     errors = _validate_line_form(data, is_add=False)
     new_users = set(form.getlist("online_users"))
-
     if errors:
         return JSONResponse({"errors": errors}, status_code=422)
-
     try:
         await atp_client.line_update(_form_to_payload(data, form, session))
         logger.info("Line updated: %r by %r", dn, session.get("username"))
     except atp_client.AtpBackendError as exc:
         logger.error("Line update failed: %r: %s", dn, exc)
         return JSONResponse({"error": str(exc)}, status_code=502)
-
-    # Sync user appearances: add/remove as needed (mirrors PHP LineManager calls)
     try:
         current_users = set(await atp_client.line_usernames_on_line(dn))
         to_add = new_users - current_users
@@ -413,11 +548,8 @@ async def lines_edit_post(
         )
     except atp_client.AtpBackendError as exc:
         logger.warning("User appearance sync failed for line %r: %s", dn, exc)
-
     return JSONResponse({"ok": True})
 
-
-# ── Delete ────────────────────────────────────────────────────────────
 
 @router.post("/{dn}/delete")
 async def lines_delete(
@@ -432,8 +564,6 @@ async def lines_delete(
     return RedirectResponse(url="/lines", status_code=303)
 
 
-# ── Blacklist report ──────────────────────────────────────────
-
 @router.get("/blacklist-report")
 async def lines_blacklist_report(
     request: Request,
@@ -444,7 +574,6 @@ async def lines_blacklist_report(
         entries = await atp_client.blacklist_search()
     except atp_client.AtpBackendError:
         entries = []
-
     if format == "csv":
         output = io.StringIO()
         writer = csv.writer(output)
@@ -457,79 +586,8 @@ async def lines_blacklist_report(
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=blacklist_report.csv"},
         )
-
     return FileResponse(PUBLIC_DIR / "index.html")
 
-
-# ── Line groups ───────────────────────────────────────────────
-
-@router.get("/line-groups/search", response_class=JSONResponse)
-async def line_groups_search_json(
-    session: dict = Depends(require_session),
-):
-    """Return line groups as JSON list for the React frontend."""
-    try:
-        groups = await atp_client.line_group_search()
-    except atp_client.AtpBackendError:
-        groups = []
-    return groups
-
-
-@router.get("/line-groups")
-async def line_groups_index():
-    return FileResponse(PUBLIC_DIR / "index.html")
-
-
-@router.post("/line-groups/add")
-async def line_groups_add(
-    request: Request,
-    session: dict = Depends(require_session),
-):
-    form = await request.form()
-    main_line = form.get("main_line", "").strip()
-    sub_lines = form.getlist("sub_lines")
-
-    try:
-        await atp_client.line_group_create({"main_line": main_line, "sub_lines": sub_lines})
-        logger.info("Line group created: main=%r by %r", main_line, session.get("username"))
-    except atp_client.AtpBackendError as exc:
-        logger.error("Line group create failed: %s", exc)
-
-    return RedirectResponse(url="/lines/line-groups", status_code=303)
-
-
-@router.post("/line-groups/{main_line}/edit")
-async def line_groups_edit(
-    main_line: str,
-    request: Request,
-    session: dict = Depends(require_session),
-):
-    form = await request.form()
-    sub_lines = form.getlist("sub_lines")
-
-    try:
-        await atp_client.line_group_update({"main_line": main_line, "sub_lines": sub_lines})
-        logger.info("Line group updated: main=%r by %r", main_line, session.get("username"))
-    except atp_client.AtpBackendError as exc:
-        logger.error("Line group update failed: %s", exc)
-
-    return RedirectResponse(url="/lines/line-groups", status_code=303)
-
-
-@router.post("/line-groups/{main_line}/delete")
-async def line_groups_delete(
-    main_line: str,
-    session: dict = Depends(require_session),
-):
-    try:
-        await atp_client.line_group_delete(main_line)
-        logger.info("Line group deleted: main=%r by %r", main_line, session.get("username"))
-    except atp_client.AtpBackendError as exc:
-        logger.error("Line group delete failed: %s", exc)
-    return RedirectResponse(url="/lines/line-groups", status_code=303)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────
 
 async def _safe_line_search(q: str = "") -> list:
     try:
@@ -538,31 +596,23 @@ async def _safe_line_search(q: str = "") -> list:
         return []
 
 
-async def _lines_for_table(raw_lines: list) -> list[dict]:
-    """
-    Build list rows for the Lines index (PHP AtpTableHelper::make_line_table).
-    Adds line_key, users, and normalised description/type for templates.
-    """
+async def _lines_for_table(raw_lines: list) -> list:
     async def enrich(ln: dict) -> dict:
         row = dict(ln)
         key = str(row.get("dn") or row.get("name") or row.get("linename") or "").strip()
         row["line_key"] = key
-        # Always expose a `dn` field so the React frontend can build edit links.
         if not row.get("dn"):
             row["dn"] = key
-        users: list[str] = []
+        users: list = []
         if key:
             try:
                 users = await atp_client.line_usernames_on_line(key)
             except atp_client.AtpBackendError:
                 pass
         row["online_users"] = users
-        # Template / API naming (C++ Line uses description, desc in some paths)
         if "description" not in row and row.get("desc") is not None:
             row["description"] = row["desc"]
-        # type may already be human-readable string from ATP JSON
         return row
-
     if not raw_lines:
         return []
     return list(await asyncio.gather(*[enrich(l) for l in raw_lines]))
@@ -584,7 +634,7 @@ async def _safe_user_list() -> list:
         return []
 
 
-async def _line_group_context() -> tuple[list, list]:
+async def _line_group_context() -> tuple:
     try:
         groups = await atp_client.line_group_search()
     except atp_client.AtpBackendError:
@@ -596,7 +646,6 @@ async def _line_group_context() -> tuple[list, list]:
 def _validate_line_form(data: dict, is_add: bool) -> dict:
     errors: dict = {}
     dn = data.get("dn", "").strip()
-
     if is_add:
         if not dn:
             if (data.get("name") or "").strip():
@@ -608,17 +657,14 @@ def _validate_line_form(data: dict, is_add: bool) -> dict:
                 errors["dn"] = "Directory number is required."
         elif not dn.isdigit():
             errors["dn"] = "Directory number must be numeric."
-
     fwd_enabled = data.get("forwarding_enabled") == "on"
     fwd_to = data.get("forward_to", "").strip()
     if fwd_enabled and not fwd_to:
         errors["forward_to"] = "Forward-to value is required when forwarding is enabled."
-
     return errors
 
 
 def _b01(val: bool) -> int:
-    """C++ Line JSON uses integers, not true/false (ATP JsonParser has no boolean literals)."""
     return 1 if val else 0
 
 
@@ -632,10 +678,8 @@ def _normalize_forwarding_condition(raw: str) -> Optional[str]:
 
 
 def _form_to_payload(data: dict, form, session: Optional[dict] = None) -> dict:
-    """Convert flat form dict + ImmutableMultiDict to ATP C++ Line JSON (see Line.cpp)."""
     import re as _re
-    # Reconstruct cascade_rules from cascade_rules[i][field] keys
-    cascade: dict[int, dict] = {}
+    cascade: dict = {}
     for key, value in form.multi_items():
         m = _re.match(r"^cascade_rules\[(\d+)\]\[(\w+)\]$", key)
         if m:
@@ -643,17 +687,12 @@ def _form_to_payload(data: dict, form, session: Optional[dict] = None) -> dict:
             cascade.setdefault(i, {})
             cascade[i][field] = value
     cascade_rules = [cascade[i] for i in sorted(cascade)]
-
     online_users = form.getlist("online_users")
-
     dn = (data.get("dn") or "").strip()
     display_name = (data.get("name") or "").strip()
-    # C++ Line.name is the line identifier (PHP "Line Name"); DN is authoritative when set
     line_name = dn if dn else display_name
-
     fwd_enabled = data.get("forwarding_enabled") == "on"
     fwd_raw = _normalize_forwarding_condition(data.get("forwarding_condition", ""))
-
     try:
         cap = int(data.get("capacity") or 1)
     except (TypeError, ValueError):
@@ -666,7 +705,6 @@ def _form_to_payload(data: dict, form, session: Optional[dict] = None) -> dict:
         rx_vol = int(data.get("receive_vol") or 100)
     except (TypeError, ValueError):
         rx_vol = 100
-
     payload: dict = {
         "name": line_name,
         "description": data.get("description", "") or "",
@@ -682,17 +720,13 @@ def _form_to_payload(data: dict, form, session: Optional[dict] = None) -> dict:
         "line_open_indication": _b01(data.get("line_open_indication") == "on"),
         "transmit_vol": tx_vol,
         "receive_vol": rx_vol,
-        # Extra keys ignored by Line() ctor but kept for future parity / debugging
         "online_users": online_users,
         "hunt_group": data.get("hunt_group", "") or "",
         "busy_on_dnd": _b01(data.get("busy_on_dnd") == "on"),
         "cascade_rules": cascade_rules,
     }
-
     if fwd_enabled and session:
         payload["forwarding_enabled_by"] = session.get("username", "") or ""
-
     if fwd_raw:
         payload["forwarding_condition"] = fwd_raw
-
     return payload
