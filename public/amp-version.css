@@ -1,11 +1,10 @@
 /* Web version line under the sidebar AMP vX.Y.Z footer */
 .amp-web-ver {
   display: block;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: inherit;
+  font-weight: inherit;
   line-height: 1.25;
   margin-top: 2px;
-  opacity: 0.85;
+  opacity: 1;
   white-space: nowrap;
-  color: rgba(255, 255, 255, 0.82) !important;
 }
