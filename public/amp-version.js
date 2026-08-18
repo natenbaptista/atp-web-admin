@@ -4,6 +4,7 @@
   var cached = "";
   var lastPoll = 0;
   var POLL_MS = 30000;
+  var obs = null;
 
   function fromLoginPayload() {
     var stores = [];
@@ -65,11 +66,23 @@
     return null;
   }
 
+  function fromOverlayNode(node) {
+    if (!node) return false;
+    if (node.id === "amp-web-ver") return true;
+    if (node.nodeType === 3 && node.parentNode && node.parentNode.id === "amp-web-ver") return true;
+    if (node.closest && node.closest("#amp-web-ver")) return true;
+    return false;
+  }
+
   function paint(ver) {
     if (!ver) return;
+    var label = "Web v " + ver;
     var existing = document.getElementById("amp-web-ver");
     if (existing) {
-      existing.textContent = "Web v " + ver;
+      if (existing.textContent === label) return;
+      if (obs) obs.disconnect();
+      existing.textContent = label;
+      if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
       return;
     }
     var amp = findAmpVersionEl();
@@ -77,8 +90,10 @@
     var line = document.createElement("div");
     line.id = "amp-web-ver";
     line.className = "amp-web-ver";
-    line.textContent = "Web v " + ver;
+    line.textContent = label;
+    if (obs) obs.disconnect();
     amp.parentNode.insertBefore(line, amp.nextSibling);
+    if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
   }
 
   async function refresh(force) {
@@ -112,7 +127,14 @@
       wrapReplace.apply(this, arguments);
       setTimeout(function () { refresh(true); }, 0);
     };
-    var obs = new MutationObserver(function () { paint(cached); });
+    obs = new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        var m = mutations[i];
+        if (fromOverlayNode(m.target)) continue;
+        paint(cached);
+        return;
+      }
+    });
     obs.observe(document.documentElement, { childList: true, subtree: true });
   }
 
