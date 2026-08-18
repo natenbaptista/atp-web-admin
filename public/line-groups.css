@@ -84,7 +84,7 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   position: fixed;
   inset: 0;
   background: rgba(17, 24, 39, 0.45);
-  z-index: 80;
+  z-index: 10050;
   display: flex;
   align-items: center;
   justify-content: center;

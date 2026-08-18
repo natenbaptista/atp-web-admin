@@ -127,11 +127,13 @@
     var walk = document.querySelectorAll("h1, h2, h3, p, div, span, button");
     for (var i = 0; i < walk.length; i++) {
       var el = walk[i];
-      if (el.closest && el.closest("#" + ROOT_ID)) continue;
+      if (el.id === "lg-modal-bg" || (el.closest && (el.closest("#" + ROOT_ID) || el.closest("#lg-modal-bg")))) continue;
       var t = (el.textContent || "").replace(/\s+/g, " ").trim();
       if (t === "No line groups configured" || t === "+ Add Line Group" || t === "Add Line Group") {
         var box = el.closest("div");
-        if (box && box.id !== ROOT_ID) box.classList.add("lg-hide-spa");
+        if (box && box.id !== ROOT_ID && box.id !== "lg-modal-bg" && !(box.closest && box.closest("#lg-modal-bg"))) {
+          box.classList.add("lg-hide-spa");
+        }
       }
     }
   }
