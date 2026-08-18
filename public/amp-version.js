@@ -88,31 +88,38 @@
     return false;
   }
 
-  function footerColor() {
-    var admin = findAdminEl();
-    if (admin && window.getComputedStyle) {
-      return window.getComputedStyle(admin).color;
-    }
-    var amp = findAmpVersionEl();
-    if (amp && window.getComputedStyle) {
-      return window.getComputedStyle(amp).color;
-    }
-    return "";
+  function footerStyle() {
+    var src = findAdminEl() || findAmpVersionEl();
+    if (!src || !window.getComputedStyle) return null;
+    var cs = window.getComputedStyle(src);
+    return {
+      color: cs.color,
+      fontSize: cs.fontSize,
+      fontWeight: cs.fontWeight,
+      letterSpacing: cs.letterSpacing,
+      lineHeight: cs.lineHeight,
+      fontFamily: cs.fontFamily
+    };
   }
 
-  function applyFooterColor(el, color) {
-    if (!el || !color) return;
-    el.style.setProperty("color", color, "important");
+  function applyFooterStyle(el, style) {
+    if (!el || !style) return;
+    el.style.setProperty("color", style.color, "important");
+    el.style.setProperty("font-size", style.fontSize, "important");
+    el.style.setProperty("font-weight", style.fontWeight, "important");
+    el.style.setProperty("letter-spacing", style.letterSpacing, "important");
+    el.style.setProperty("line-height", style.lineHeight, "important");
+    el.style.setProperty("font-family", style.fontFamily, "important");
     el.style.opacity = "1";
   }
 
   function syncFooterShades() {
-    var color = footerColor();
-    if (!color) return;
+    var style = footerStyle();
+    if (!style) return;
     var amp = findAmpVersionEl();
-    if (amp) applyFooterColor(amp, color);
+    if (amp) applyFooterStyle(amp, style);
     var web = document.getElementById("amp-web-ver");
-    if (web) applyFooterColor(web, color);
+    if (web) applyFooterStyle(web, style);
   }
 
   function paint(ver) {
