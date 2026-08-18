@@ -27,6 +27,7 @@ from logging_config import setup_logging, logger
 from session import (
     SESSION_COOKIE, cookie_flags, make_session, read_session, get_session, require_session,
     APP_VERSION, INSTANCE_NAME, WEB_VERSION,
+    get_app_version, get_web_version,
 )
 from routers import dashboard as dashboard_router
 from routers import users as users_router
@@ -90,7 +91,7 @@ async def _cleanup_temp_files() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     task = asyncio.create_task(_cleanup_temp_files())
-    logger.info("WebAdmin started (version %s, DEV_MODE=%s, DUMMY_LOGIN=%s)", APP_VERSION, DEV_MODE, DUMMY_LOGIN)
+    logger.info("WebAdmin started (version %s, DEV_MODE=%s, DUMMY_LOGIN=%s)", get_app_version(), DEV_MODE, DUMMY_LOGIN)
     yield
     task.cancel()
     await db_module.close_pool()
@@ -300,8 +301,8 @@ async def login_post(request: Request):
             "role":          user.get("role", ""),
             "guid":          user.get("guid", ""),
             "email":         user.get("email", ""),
-            "app_version":   APP_VERSION,
-            "web_version":   WEB_VERSION,
+            "app_version":   get_app_version(),
+            "web_version":   get_web_version(),
             "instance_name": instance_name,
         })
         response.set_cookie(SESSION_COOKIE, make_session(user), **flags)
@@ -400,7 +401,7 @@ async def session_check(session: Optional[dict] = Depends(get_session)):
 async def health():
     """Liveness check — also probes the backend socket."""
     instance_name = INSTANCE_NAME
-    status = {"app": "ok", "version": APP_VERSION, "web_version": WEB_VERSION, "instance_name": instance_name, "backend": "not configured"}
+    status = {"app": "ok", "version": get_app_version(), "web_version": get_web_version(), "instance_name": instance_name, "backend": "not configured"}
     if os.environ.get("ATPMGR_DATADIR"):
         try:
             reply = await atp_client.request("controller_echo")

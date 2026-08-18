@@ -176,3 +176,6 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   gap: 8px;
   margin-top: 16px;
 }
+
+#lg-overlay .lg-empty p { margin: 0 0 14px; }
+#lg-overlay .lg-empty .lg-btn { display: inline-block; }
