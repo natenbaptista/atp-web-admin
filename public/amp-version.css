@@ -1,0 +1,10 @@
+/* Web version line under the sidebar AMP vX.Y.Z footer */
+.amp-web-ver {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.25;
+  margin-top: 2px;
+  opacity: 0.85;
+  white-space: nowrap;
+}
