@@ -53,15 +53,29 @@
     return "";
   }
 
-  function findAmpVersionEl() {
+  function sidebarLeaves() {
     var nodes = document.querySelectorAll("aside *, nav *, [class*='sidebar'] *, [class*='Sidebar'] *");
-    var list = nodes.length ? nodes : document.querySelectorAll("body *");
+    return nodes.length ? nodes : document.querySelectorAll("body *");
+  }
+
+  function findAmpVersionEl() {
+    var list = sidebarLeaves();
     for (var i = 0; i < list.length; i++) {
       var el = list[i];
       if (el.id === "amp-web-ver" || (el.classList && el.classList.contains("amp-web-ver"))) continue;
       if (el.children && el.children.length) continue;
       var t = (el.textContent || "").trim();
       if (/^v\d+\.\d+(\.\d+)*$/.test(t)) return el;
+    }
+    return null;
+  }
+
+  function findAdminEl() {
+    var list = sidebarLeaves();
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      if (el.children && el.children.length) continue;
+      if ((el.textContent || "").trim() === "Admin") return el;
     }
     return null;
   }
@@ -74,12 +88,31 @@
     return false;
   }
 
-  function matchAmpColor(line, amp) {
-    if (!line) return;
-    var src = amp || (line.previousElementSibling);
-    if (!src || !window.getComputedStyle) return;
-    var c = window.getComputedStyle(src).color;
-    if (c) line.style.color = c;
+  function footerColor() {
+    var admin = findAdminEl();
+    if (admin && window.getComputedStyle) {
+      return window.getComputedStyle(admin).color;
+    }
+    var amp = findAmpVersionEl();
+    if (amp && window.getComputedStyle) {
+      return window.getComputedStyle(amp).color;
+    }
+    return "";
+  }
+
+  function applyFooterColor(el, color) {
+    if (!el || !color) return;
+    el.style.setProperty("color", color, "important");
+    el.style.opacity = "1";
+  }
+
+  function syncFooterShades() {
+    var color = footerColor();
+    if (!color) return;
+    var amp = findAmpVersionEl();
+    if (amp) applyFooterColor(amp, color);
+    var web = document.getElementById("amp-web-ver");
+    if (web) applyFooterColor(web, color);
   }
 
   function paint(ver) {
@@ -87,11 +120,12 @@
     var label = "Web v " + ver;
     var existing = document.getElementById("amp-web-ver");
     if (existing) {
-      matchAmpColor(existing, existing.previousElementSibling);
-      if (existing.textContent === label) return;
-      if (obs) obs.disconnect();
-      existing.textContent = label;
-      if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
+      if (existing.textContent !== label) {
+        if (obs) obs.disconnect();
+        existing.textContent = label;
+        if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
+      }
+      syncFooterShades();
       return;
     }
     var amp = findAmpVersionEl();
@@ -100,10 +134,10 @@
     line.id = "amp-web-ver";
     line.className = "amp-web-ver";
     line.textContent = label;
-    matchAmpColor(line, amp);
     if (obs) obs.disconnect();
     amp.parentNode.insertBefore(line, amp.nextSibling);
     if (obs) obs.observe(document.documentElement, { childList: true, subtree: true });
+    syncFooterShades();
   }
 
   async function refresh(force) {
