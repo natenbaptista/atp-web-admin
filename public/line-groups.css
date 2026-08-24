@@ -1,12 +1,25 @@
 /* Line Groups overlay — /lines/groups */
+.lg-host {
+  position: relative;
+  z-index: 40;
+  isolation: isolate;
+  pointer-events: auto;
+  margin: 8px 0 16px;
+}
 #lg-overlay {
-  margin: 12px 0 16px;
+  position: relative;
+  z-index: 40;
+  margin: 0;
   padding: 16px 18px 14px;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 10px;
   color: #1f2937;
   font-size: 14px;
+  pointer-events: auto !important;
+}
+#lg-overlay, #lg-overlay * {
+  pointer-events: auto !important;
 }
 #lg-overlay .lg-head {
   display: flex;
@@ -14,6 +27,8 @@
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+  position: relative;
+  z-index: 2;
 }
 #lg-overlay .lg-title {
   font-size: 16px;
@@ -24,11 +39,13 @@
   border: 1px solid #d1d5db;
   background: #fff;
   color: #1f2937;
-  padding: 7px 12px;
+  padding: 8px 14px;
   border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
   font-size: 13px;
+  position: relative;
+  z-index: 3;
 }
 #lg-overlay .lg-btn:hover { background: #f3f4f6; }
 #lg-overlay .lg-btn.primary {
@@ -43,10 +60,15 @@
   color: #fff;
 }
 #lg-overlay .lg-btn:disabled { opacity: .45; cursor: not-allowed; }
+#lg-overlay .lg-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
 #lg-overlay table {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+  table-layout: auto;
 }
 #lg-overlay th {
   text-align: left;
@@ -56,13 +78,20 @@
   color: #6b7280;
   padding: 10px 8px;
   border-bottom: 1px solid #e5e7eb;
+  white-space: nowrap;
 }
 #lg-overlay td {
   padding: 10px 8px;
   border-bottom: 1px solid #f3f4f6;
   vertical-align: middle;
+  word-break: break-word;
 }
-#lg-overlay .lg-actions { display: flex; gap: 6px; }
+#lg-overlay .lg-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  white-space: nowrap;
+}
 #lg-overlay .lg-empty {
   padding: 28px 8px;
   color: #6b7280;
@@ -76,9 +105,20 @@
   margin: 8px 0 0;
 }
 #lg-overlay .lg-err.hidden { display: none; }
+#lg-overlay .lg-empty p { margin: 0 0 14px; }
+#lg-overlay .lg-empty .lg-btn { display: inline-block; }
 
+/* Hide SPA empty chrome; kill pointer events so it cannot steal clicks */
 body.lg-overlay-on table:not(#lg-table) { display: none !important; }
-body.lg-overlay-on .lg-hide-spa { display: none !important; }
+body.lg-overlay-on .lg-hide-spa {
+  display: none !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+}
 
 .lg-modal-bg {
   position: fixed;
@@ -89,6 +129,7 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   align-items: center;
   justify-content: center;
   padding: 24px;
+  pointer-events: auto;
 }
 .lg-modal-bg.hidden { display: none; }
 .lg-modal {
@@ -100,12 +141,15 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   padding: 18px 18px 16px;
   box-shadow: 0 16px 40px rgba(0,0,0,.18);
   color: #1f2937;
+  position: relative;
+  z-index: 10051;
+  pointer-events: auto;
 }
 .lg-modal h3 {
   margin: 0 0 14px;
   font-size: 16px;
 }
-.lg-field { margin-bottom: 12px; }
+.lg-field { margin-bottom: 12px; position: relative; }
 .lg-field label {
   display: block;
   font-size: 11px;
@@ -135,6 +179,8 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   max-height: 180px;
   overflow: auto;
   background: #fff;
+  position: relative;
+  z-index: 10060;
 }
 .lg-suggest.hidden { display: none; }
 .lg-suggest button {
@@ -143,9 +189,10 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   text-align: left;
   border: 0;
   background: #fff;
-  padding: 7px 10px;
+  padding: 8px 10px;
   cursor: pointer;
   font: inherit;
+  pointer-events: auto;
 }
 .lg-suggest button:hover { background: #f0fdf4; }
 .lg-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -176,6 +223,3 @@ body.lg-overlay-on .lg-hide-spa { display: none !important; }
   gap: 8px;
   margin-top: 16px;
 }
-
-#lg-overlay .lg-empty p { margin: 0 0 14px; }
-#lg-overlay .lg-empty .lg-btn { display: inline-block; }

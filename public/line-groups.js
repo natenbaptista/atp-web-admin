@@ -124,32 +124,47 @@
     });
   }
 
+  function isOurs(el) {
+    if (!el) return false;
+    if (el.id === ROOT_ID || el.id === "lg-modal-bg" || el.id === "lg-host") return true;
+    if (el.closest && (el.closest("#" + ROOT_ID) || el.closest("#lg-modal-bg") || el.closest("#lg-host"))) return true;
+    return false;
+  }
+
   function hideSpaEmpty() {
-    if (!document.getElementById(ROOT_ID)) return;
-    var walk = document.querySelectorAll("h1, h2, h3, p, div, span, button");
+    var root = document.getElementById(ROOT_ID);
+    if (!root) return;
+    // Never hide our own Add / Edit / Delete controls
+    root.querySelectorAll(".lg-hide-spa").forEach(function (n) {
+      if (isOurs(n)) n.classList.remove("lg-hide-spa");
+    });
+    var walk = document.querySelectorAll("h1, h2, h3, p, div, span, button, section, article");
     for (var i = 0; i < walk.length; i++) {
       var el = walk[i];
-      if (el.id === ROOT_ID || el.id === "lg-modal-bg") continue;
-      if (el.closest && (el.closest("#" + ROOT_ID) || el.closest("#lg-modal-bg"))) continue;
+      if (isOurs(el)) continue;
       var t = (el.textContent || "").replace(/\s+/g, " ").trim();
       var isEmpty = t === "No line groups configured" || t === "No line groups configured.";
       var isAdd = t === "+ Add Line Group" || t === "Add Line Group";
       if (!isEmpty && !isAdd) continue;
       if (isAdd && el.tagName === "BUTTON") {
         el.classList.add("lg-hide-spa");
+        var wrap = el.parentElement;
+        if (wrap && !isOurs(wrap)) wrap.classList.add("lg-hide-spa");
         continue;
       }
       var box = el;
-      for (var up = 0; up < 3 && box && box.parentElement; up++) {
+      for (var up = 0; up < 6 && box && box.parentElement; up++) {
         var parent = box.parentElement;
-        if (parent.id === ROOT_ID || parent.id === "lg-modal-bg") break;
-        if (parent.querySelector && parent.querySelector("#" + ROOT_ID)) break;
+        if (isOurs(parent)) break;
         if (parent.tagName === "MAIN" || parent.id === "root" || parent === document.body) break;
+        var pt = (parent.textContent || "").replace(/\s+/g, " ").trim();
+        if (pt.indexOf("No line groups configured") >= 0 && pt.length < 160) {
+          box = parent;
+          continue;
+        }
         box = parent;
       }
-      if (box && box.id !== ROOT_ID && !(box.querySelector && box.querySelector("#" + ROOT_ID))) {
-        box.classList.add("lg-hide-spa");
-      }
+      if (box && !isOurs(box)) box.classList.add("lg-hide-spa");
     }
   }
 
@@ -203,12 +218,16 @@
         "</td></tr>";
     }).join("");
     tbody.querySelectorAll(".lg-edit").forEach(function (btn) {
-      btn.addEventListener("click", function () {
+      btn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
         openModal("edit", btn.closest("tr").dataset.main);
       });
     });
     tbody.querySelectorAll(".lg-del").forEach(function (btn) {
-      btn.addEventListener("click", function () {
+      btn.addEventListener("click", function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
         deleteGroup(btn.closest("tr").dataset.main);
       });
     });
@@ -248,10 +267,13 @@
       }).join("");
       sm.classList.toggle("hidden", !mains.length);
       sm.querySelectorAll("button").forEach(function (b) {
-        b.addEventListener("click", function () {
+        b.addEventListener("mousedown", function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
           state.main = b.dataset.val;
           state.qMain = b.dataset.val;
           state.subs = state.subs.filter(function (s) { return s !== state.main; });
+          state.error = "";
           renderModal();
         });
       });
@@ -266,9 +288,12 @@
       }).join("");
       ss.classList.toggle("hidden", !subs.length);
       ss.querySelectorAll("button").forEach(function (b) {
-        b.addEventListener("click", function () {
+        b.addEventListener("mousedown", function (ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
           if (state.subs.indexOf(b.dataset.val) < 0) state.subs.push(b.dataset.val);
           state.qSub = "";
+          state.error = "";
           renderModal();
           bg.querySelector("#lg-sub").focus();
         });
@@ -334,7 +359,16 @@
     closeModal();
     await loadGroups();
     var root = document.getElementById(ROOT_ID);
-    if (root) renderTable(root);
+    if (root) {
+      renderTable(root);
+      root.classList.remove("lg-hide-spa");
+      var addBtn = root.querySelector("#lg-add");
+      if (addBtn) {
+        addBtn.classList.remove("lg-hide-spa");
+        addBtn.style.display = "";
+      }
+    }
+    hideSpaEmpty();
   }
 
   async function deleteGroup(main) {
@@ -362,7 +396,16 @@
     }
     await loadGroups();
     var root = document.getElementById(ROOT_ID);
-    if (root) renderTable(root);
+    if (root) {
+      renderTable(root);
+      root.classList.remove("lg-hide-spa");
+      var addBtn = root.querySelector("#lg-add");
+      if (addBtn) {
+        addBtn.classList.remove("lg-hide-spa");
+        addBtn.style.display = "";
+      }
+    }
+    hideSpaEmpty();
   }
 
   function buildRoot() {
@@ -415,6 +458,24 @@
       renderModal();
       bg.querySelector("#lg-main").focus();
     });
+    bg.querySelector("#lg-main").addEventListener("keydown", function (ev) {
+      if (state.mode === "edit") return;
+      if (ev.key !== "Enter") return;
+      ev.preventDefault();
+      var mains = suggestMain();
+      var typed = (ev.target.value || "").trim();
+      var pick = null;
+      for (var i = 0; i < mains.length; i++) {
+        if (mains[i] === typed) { pick = mains[i]; break; }
+      }
+      if (!pick && mains.length === 1) pick = mains[0];
+      if (!pick && typed && state.lines.indexOf(typed) >= 0) pick = typed;
+      if (!pick) return;
+      state.main = pick;
+      state.qMain = pick;
+      state.error = "";
+      renderModal();
+    });
     bg.querySelector("#lg-sub").addEventListener("input", function (ev) {
       state.qSub = ev.target.value;
       state.error = "";
@@ -423,16 +484,48 @@
     });
   }
 
-  function findAnchor() {
-    var main = document.querySelector("main") || document.getElementById("root");
+  function findHeading() {
+    var prefer = null;
     var nodes = document.querySelectorAll("h1, h2, h3");
     for (var i = 0; i < nodes.length; i++) {
       var t = (nodes[i].textContent || "").replace(/\s+/g, " ").trim();
-      if (t === "Line Groups" || t === "Lines") {
-        return nodes[i].parentElement || nodes[i];
-      }
+      if (t === "Line Groups") return nodes[i];
+      if (t === "Lines" && !prefer) prefer = nodes[i];
     }
-    return main || document.body;
+    return prefer;
+  }
+
+  function ensureHost() {
+    var host = document.getElementById("lg-host");
+    if (host) return host;
+    host = document.createElement("div");
+    host.id = "lg-host";
+    host.className = "lg-host";
+    var heading = findHeading();
+    if (heading && heading.parentNode) {
+      heading.parentNode.insertBefore(host, heading.nextSibling);
+    } else {
+      var main = document.querySelector("main") || document.getElementById("root") || document.body;
+      main.insertBefore(host, main.firstChild);
+    }
+    return host;
+  }
+
+  function wireRoot(root) {
+    if (root.dataset.lgWired === "1") return;
+    root.dataset.lgWired = "1";
+    var add = root.querySelector("#lg-add");
+    if (add) add.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openModal("add");
+    });
+    var addEmpty = root.querySelector("#lg-add-empty");
+    if (addEmpty) addEmpty.addEventListener("click", function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      openModal("add");
+    });
   }
 
   async function mount() {
@@ -441,26 +534,31 @@
       return;
     }
     document.body.classList.add("lg-overlay-on");
-    hideSpaEmpty();
     ensureModal();
+    var host = ensureHost();
+    // Keep host right under the page heading if SPA remounted siblings
+    var heading = findHeading();
+    if (heading && heading.parentNode && host.previousElementSibling !== heading) {
+      heading.parentNode.insertBefore(host, heading.nextSibling);
+    }
     var existing = document.getElementById(ROOT_ID);
     if (existing) {
-      var hide = existing.closest(".lg-hide-spa");
-      if (hide) hide.classList.remove("lg-hide-spa");
+      if (existing.parentNode !== host) host.appendChild(existing);
+      existing.classList.remove("lg-hide-spa");
       existing.style.display = "";
+      existing.style.pointerEvents = "auto";
+      wireRoot(existing);
+      if (!state.loaded) {
+        await Promise.all([loadGroups(), loadLines()]);
+        state.loaded = true;
+        renderTable(existing);
+      }
+      hideSpaEmpty();
       return;
     }
-    var anchor = findAnchor();
-    if (!anchor) return;
     var root = buildRoot();
-    if (anchor.parentElement) {
-      anchor.parentElement.insertBefore(root, anchor.nextSibling);
-    } else {
-      document.body.appendChild(root);
-    }
-    root.querySelector("#lg-add").addEventListener("click", function () { openModal("add"); });
-    var addEmpty = root.querySelector("#lg-add-empty");
-    if (addEmpty) addEmpty.addEventListener("click", function () { openModal("add"); });
+    host.appendChild(root);
+    wireRoot(root);
     if (!state.loaded) {
       await Promise.all([loadGroups(), loadLines()]);
       state.loaded = true;
@@ -473,6 +571,8 @@
     document.body.classList.remove("lg-overlay-on");
     var el = document.getElementById(ROOT_ID);
     if (el) el.remove();
+    var host = document.getElementById("lg-host");
+    if (host) host.remove();
     var bg = document.getElementById("lg-modal-bg");
     if (bg) bg.remove();
     state.loaded = false;
