@@ -23,6 +23,7 @@ from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 import atp_client
 import db as db_module
+import password_policy
 from logging_config import setup_logging, logger
 from session import (
     SESSION_COOKIE, cookie_flags, make_session, read_session, get_session, require_session,
@@ -109,6 +110,42 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # CSRF protection is provided by SameSite=Lax on the session cookie (session.py).
 # For a React SPA on the same origin, this is sufficient — the browser will not
 # send the session cookie on cross-origin POST requests, so CSRF attacks are blocked.
+
+# First-login / admin-reset password gate. Existing users with no flag pass through.
+_PASSWORD_CHANGE_ALLOW = {
+    "/login", "/logout", "/reset-password", "/change-password",
+    "/session-check", "/health", "/api/health",
+}
+
+@app.middleware("http")
+async def force_password_change_gate(request: Request, call_next):
+    path = request.url.path
+    if (
+        path in _PASSWORD_CHANGE_ALLOW
+        or path.startswith("/assets/")
+        or path.startswith("/password-security.")
+    ):
+        return await call_next(request)
+    suffix = path.rsplit(".", 1)[-1].lower() if "." in path.split("/")[-1] else ""
+    if suffix in ("js", "css", "png", "ico", "svg", "txt", "woff", "woff2", "map"):
+        return await call_next(request)
+    raw = request.cookies.get(SESSION_COOKIE)
+    session = read_session(raw)
+    if not session:
+        return await call_next(request)
+    username = session.get("username", "")
+    must = bool(session.get("must_change_password")) or password_policy.get_must_change(username)
+    if not must:
+        return await call_next(request)
+    # Allow the SPA shell (GET HTML) so the overlay can render; block API use.
+    accept = request.headers.get("accept", "")
+    if request.method == "GET" and "application/json" not in accept:
+        return await call_next(request)
+    return JSONResponse(
+        {"error": "Password change required.", "must_change_password": True},
+        status_code=403,
+    )
+
 
 # Request timing — logs every request at DEBUG, slow requests (>1 s) at WARNING
 @app.middleware("http")
@@ -280,6 +317,7 @@ async def login_post(request: Request):
         return JSONResponse({"error": fail_reason}, status_code=401)
 
     logger.info("Login success: user=%r ip=%s role=%s", username, client_ip, user.get("role", "?"))
+    user["must_change_password"] = password_policy.get_must_change(username)
     flags = cookie_flags()
 
     # Read instance_name from ATP general settings; fall back to env var
@@ -304,6 +342,7 @@ async def login_post(request: Request):
             "app_version":   get_app_version(),
             "web_version":   get_web_version(),
             "instance_name": instance_name,
+            "must_change_password": bool(user.get("must_change_password", False)),
         })
         response.set_cookie(SESSION_COOKIE, make_session(user), **flags)
         if remember_me:
@@ -354,6 +393,12 @@ async def reset_password_post(
     if not current_password or not new_password:
         return JSONResponse({"error": "Both current and new password are required."}, status_code=400)
 
+    pw_err = password_policy.password_error(new_password)
+    if pw_err:
+        return JSONResponse({"error": pw_err}, status_code=400)
+    if new_password == current_password:
+        return JSONResponse({"error": password_policy.PASSWORD_SAME_AS_CURRENT_MESSAGE}, status_code=400)
+
     username = session.get("username", "")
 
     # Verify current password first
@@ -377,8 +422,13 @@ async def reset_password_post(
     user["password"] = new_password
     try:
         await atp_client.user_update(user)
+        password_policy.clear_must_change(username)
         logger.info("Password changed: user=%r", username)
-        return {"success": True, "message": "Password changed successfully."}
+        response = JSONResponse({"success": True, "message": "Password changed successfully."})
+        refreshed = dict(session)
+        refreshed["must_change_password"] = False
+        response.set_cookie(SESSION_COOKIE, make_session(refreshed), **cookie_flags())
+        return response
     except atp_client.AtpBackendError as exc:
         logger.error("Password change failed: user=%r error=%s", username, exc)
         return JSONResponse({"error": str(exc)}, status_code=502)
@@ -393,7 +443,12 @@ async def session_check(session: Optional[dict] = Depends(get_session)):
     """
     if not session:
         return Response(status_code=401)
-    return {"valid": True, "username": session["username"]}
+    must = bool(session.get("must_change_password")) or password_policy.get_must_change(session.get("username", ""))
+    return {
+        "valid": True,
+        "username": session["username"],
+        "must_change_password": must,
+    }
 
 
 

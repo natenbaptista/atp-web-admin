@@ -95,6 +95,8 @@ def make_session(user: dict) -> str:
         "last_name":  user.get("last_name", ""),
         "role":       user.get("role", ""),
         "guid":       user.get("guid", ""),
+        # Missing on older cookies = False (existing users are not forced).
+        "must_change_password": bool(user.get("must_change_password", False)),
     })
 
 

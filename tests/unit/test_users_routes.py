@@ -177,3 +177,103 @@ async def test_logs_index_renders(client):
 async def test_directory_index_renders(client):
     resp = await client.get("/directory")
     assert resp.status_code == 200
+
+
+# ── Password policy on create / edit ──────────────────────────────────────────
+
+from unittest.mock import AsyncMock, patch
+
+
+@pytest.mark.asyncio
+async def test_users_add_rejects_weak_password(client):
+    resp = await client.post(
+        "/users/add",
+        data={
+            "username": "newuser",
+            "password": "weak",
+            "first_name": "New",
+            "last_name": "User",
+            "role": "Admin",
+        },
+        headers={"Accept": "application/json"},
+    )
+    assert resp.status_code == 422
+    errors = resp.json()["errors"]
+    assert "password" in errors
+
+
+@pytest.mark.asyncio
+async def test_users_add_accepts_strong_password_and_flags_change(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("MUST_CHANGE_PASSWORD_FILE", str(tmp_path / "flags.json"))
+    import password_policy
+    password_policy.reset_store()
+    with patch("atp_client.user_create", new_callable=AsyncMock):
+        resp = await client.post(
+            "/users/add",
+            data={
+                "username": "newuser",
+                "password": "Good#pass1",
+                "first_name": "New",
+                "last_name": "User",
+                "role": "Auditor",
+            },
+            headers={"Accept": "application/json"},
+            follow_redirects=False,
+        )
+    assert resp.status_code in (200, 303)
+    assert password_policy.get_must_change("newuser") is True
+
+
+@pytest.mark.asyncio
+async def test_users_edit_blank_password_keeps_unchanged(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("MUST_CHANGE_PASSWORD_FILE", str(tmp_path / "flags.json"))
+    import password_policy
+    password_policy.reset_store()
+    with patch("atp_client.user_update", new_callable=AsyncMock):
+        resp = await client.post(
+            "/users/alice/edit",
+            data={
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "role": "User",
+                "password": "",
+            },
+            headers={"Accept": "application/json"},
+            follow_redirects=False,
+        )
+    assert resp.status_code in (200, 303)
+    assert password_policy.get_must_change("alice") is False
+
+
+@pytest.mark.asyncio
+async def test_users_edit_new_password_rejects_weak_and_flags_strong(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("MUST_CHANGE_PASSWORD_FILE", str(tmp_path / "flags.json"))
+    import password_policy
+    password_policy.reset_store()
+    resp = await client.post(
+        "/users/alice/edit",
+        data={
+            "first_name": "Alice",
+            "last_name": "Smith",
+            "role": "Admin",
+            "password": "short",
+        },
+        headers={"Accept": "application/json"},
+    )
+    assert resp.status_code == 422
+    assert "password" in resp.json()["errors"]
+
+    with patch("atp_client.user_update", new_callable=AsyncMock):
+        resp = await client.post(
+            "/users/alice/edit",
+            data={
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "role": "Admin",
+                "password": "Good#pass1",
+            },
+            headers={"Accept": "application/json"},
+            follow_redirects=False,
+        )
+    assert resp.status_code in (200, 303)
+    assert password_policy.get_must_change("alice") is True
