@@ -33,7 +33,7 @@
 
   function isUserForm() {
     var p = pathOf();
-    return /\/users\/add$/.test(p) || /\/users\/[^/]+\/(edit|copy)$/.test(p);
+    return /\/users\/(add|new)$/.test(p) || /\/users\/[^/]+\/(edit|copy)$/.test(p);
   }
 
   function isResetPage() {
