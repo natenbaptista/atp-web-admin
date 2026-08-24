@@ -30,6 +30,15 @@ os.environ.setdefault("ATPMGR_DATADIR", "")  # empty = no socket required in dev
 
 from main import app  # noqa: E402  (must come after env setup)
 from session import make_session  # noqa: E402
+import password_policy  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _reset_password_flags():
+    """Existing users stay unforced; isolate the sidecar store between tests."""
+    password_policy.reset_store()
+    yield
+    password_policy.reset_store()
 
 
 # ── Session cookie helper ─────────────────────────────────────────────────────

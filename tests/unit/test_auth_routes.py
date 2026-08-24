@@ -117,3 +117,53 @@ async def test_api_health(anon_client):
     resp = await anon_client.get("/api/health")
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+# ── Password change / first-login flag ────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_login_reports_must_change_password(anon_client, tmp_path, monkeypatch):
+    monkeypatch.setenv("MUST_CHANGE_PASSWORD_FILE", str(tmp_path / "flags.json"))
+    import password_policy
+    password_policy.reset_store()
+    resp = await anon_client.post(
+        "/login",
+        json={"username": "admin", "password": "admin"},
+    )
+    assert resp.status_code == 200
+    assert resp.json().get("must_change_password") is False
+
+    password_policy.mark_must_change("admin")
+    resp = await anon_client.post(
+        "/login",
+        json={"username": "admin", "password": "admin"},
+    )
+    assert resp.status_code == 200
+    assert resp.json().get("must_change_password") is True
+
+
+@pytest.mark.asyncio
+async def test_session_check_includes_must_change_false(client):
+    resp = await client.get("/session-check")
+    assert resp.status_code == 200
+    assert resp.json()["must_change_password"] is False
+
+
+@pytest.mark.asyncio
+async def test_reset_password_rejects_weak_new_password(client):
+    resp = await client.post(
+        "/reset-password",
+        json={"current_password": "admin", "new_password": "weak"},
+    )
+    assert resp.status_code == 400
+    assert "letter" in resp.json()["error"].lower() or "8" in resp.json()["error"]
+
+
+@pytest.mark.asyncio
+async def test_reset_password_rejects_same_as_current(client):
+    resp = await client.post(
+        "/reset-password",
+        json={"current_password": "Same#pass1", "new_password": "Same#pass1"},
+    )
+    assert resp.status_code == 400
+    assert "different" in resp.json()["error"].lower()

@@ -32,6 +32,7 @@ from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 import atp_client
+import password_policy
 from session import get_session, require_session
 from logging_config import logger
 
@@ -185,6 +186,7 @@ async def users_add_post(
     try:
         await atp_client.user_create(_form_to_payload(form))
         username_new = data.get("username", "")
+        password_policy.mark_must_change(username_new)
         role = data.get("role", "User")
         if role.lower() == "user":
             settings = _form_to_settings(form)
@@ -229,6 +231,8 @@ async def users_edit_post(
     try:
         payload = _form_to_payload(form, extra={"username": username})
         await atp_client.user_update(payload)
+        if (data.get("password") or "").strip():
+            password_policy.mark_must_change(username)
         # Turret settings only apply to User role (matches PHP save_user behaviour)
         role = data.get("role", "User")
         if role.lower() == "user":
@@ -258,6 +262,7 @@ async def users_delete(
         return RedirectResponse(url="/users", status_code=303)
     try:
         await atp_client.user_delete(username)
+        password_policy.clear_must_change(username)
         logger.info("User deleted: %r by %r", username, session.get("username"))
     except atp_client.AtpBackendError as exc:
         logger.error("Delete failed for user %r: %s", username, exc)
@@ -291,6 +296,7 @@ async def users_copy_post(
     try:
         await atp_client.user_create(_form_to_payload(form))
         username_new = data.get("username", "")
+        password_policy.mark_must_change(username_new)
         role = data.get("role", "User")
         if role.lower() == "user":
             settings = _form_to_settings(form)
@@ -378,15 +384,21 @@ async def users_import(
         imported, errors = 0, []
         for u in users_data:
             try:
+                pw = u.get("password", "")
+                pw_err = password_policy.password_error(pw)
+                if pw_err:
+                    errors.append({"username": u.get("username", ""), "error": pw_err})
+                    continue
                 await atp_client.user_create({
                     "username":      u.get("username", ""),
-                    "password":      u.get("password", ""),
+                    "password":      pw,
                     "first_name":    u.get("first_name", ""),
                     "last_name":     u.get("last_name", ""),
                     "role":          "User",
                     "turret_login":  u.get("turret_login", ""),
                     "turret_pin":    u.get("turret_pin", ""),
                 })
+                password_policy.mark_must_change(u.get("username", ""))
                 imported += 1
             except atp_client.AtpBackendError as exc:
                 errors.append({"username": u.get("username", ""), "error": str(exc)})
@@ -1096,7 +1108,14 @@ def _validate_user_form(data: dict, is_add: bool) -> dict:
         if not password:
             errors["password"] = "Password is required."
     else:
-        pass  # password is optional on edit
+        pass  # password is optional on edit (blank = keep unchanged)
+
+    # Complexity applies to every role when a password is being set.
+    # Access PIN / turret_pin is intentionally not checked here.
+    if password and "password" not in errors:
+        pw_err = password_policy.password_error(password)
+        if pw_err:
+            errors["password"] = pw_err
 
     if role == "User" and turret_pin:
         if not turret_pin.isdigit() or len(turret_pin) != 4:
