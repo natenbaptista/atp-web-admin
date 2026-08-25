@@ -584,7 +584,11 @@
     if (location.pathname !== lastPath) {
       lastPath = location.pathname;
       state.loaded = false;
-      if (!isPage()) teardown();
+    }
+    // Always teardown off Line Groups so body.lg-overlay-on cannot hide other pages' tables.
+    if (!isPage()) {
+      teardown();
+      return;
     }
     mount();
   }
