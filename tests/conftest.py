@@ -57,6 +57,11 @@ def admin_cookie() -> dict:
     return {"atp_session": make_session(ADMIN_USER)}
 
 
+def must_change_cookie() -> dict:
+    """Admin session with the first-login password lock set."""
+    return {"atp_session": make_session({**ADMIN_USER, "must_change_password": True})}
+
+
 # ── ASGI test client ──────────────────────────────────────────────────────────
 
 @pytest_asyncio.fixture
@@ -77,6 +82,18 @@ async def anon_client() -> AsyncGenerator[AsyncClient, None]:
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://testserver",
+        follow_redirects=False,
+    ) as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def must_change_client() -> AsyncGenerator[AsyncClient, None]:
+    """Authenticated client whose password must be changed before using the app."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+        cookies=must_change_cookie(),
         follow_redirects=False,
     ) as ac:
         yield ac

@@ -112,10 +112,20 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # send the session cookie on cross-origin POST requests, so CSRF attacks are blocked.
 
 # First-login / admin-reset password gate. Existing users with no flag pass through.
+# This is a session lock: flagged users may only hit login/logout/password-change
+# and static assets until they set a new password. They must not enter the app.
 _PASSWORD_CHANGE_ALLOW = {
     "/login", "/logout", "/reset-password", "/change-password",
     "/session-check", "/health", "/api/health",
 }
+
+
+def _session_must_change(session: Optional[dict]) -> bool:
+    if not session:
+        return False
+    username = session.get("username", "")
+    return bool(session.get("must_change_password")) or password_policy.get_must_change(username)
+
 
 @app.middleware("http")
 async def force_password_change_gate(request: Request, call_next):
@@ -131,16 +141,12 @@ async def force_password_change_gate(request: Request, call_next):
         return await call_next(request)
     raw = request.cookies.get(SESSION_COOKIE)
     session = read_session(raw)
-    if not session:
+    if not session or not _session_must_change(session):
         return await call_next(request)
-    username = session.get("username", "")
-    must = bool(session.get("must_change_password")) or password_policy.get_must_change(username)
-    if not must:
-        return await call_next(request)
-    # Allow the SPA shell (GET HTML) so the overlay can render; block API use.
+    # Lock the session: browsers go to the change-password page; APIs get 403.
     accept = request.headers.get("accept", "")
     if request.method == "GET" and "application/json" not in accept:
-        return await call_next(request)
+        return RedirectResponse(url="/change-password", status_code=303)
     return JSONResponse(
         {"error": "Password change required.", "must_change_password": True},
         status_code=403,
@@ -253,7 +259,10 @@ async def login_get(
     request: Request,
     atp_session: Optional[str] = Cookie(default=None),
 ):
-    if read_session(atp_session):
+    session = read_session(atp_session)
+    if session:
+        if _session_must_change(session):
+            return RedirectResponse(url="/change-password")
         return RedirectResponse(url="/dashboard")
     index = PUBLIC_DIR / "index.html"
     if index.exists():
@@ -267,7 +276,8 @@ async def login_post(request: Request):
     """
     Accepts both JSON (React SPA) and form-urlencoded (legacy) bodies.
     JSON response: returns user data + sets session cookie.
-    Form response: redirects to /dashboard + sets session cookie.
+    Form response: redirects to /dashboard, or /change-password when
+    must_change_password is set.
     """
     content_type = request.headers.get("content-type", "")
     remember_me = None
@@ -351,8 +361,9 @@ async def login_post(request: Request):
             response.delete_cookie("remember_me_id")
         return response
     else:
-        # Legacy form POST: redirect to dashboard.
-        redir = RedirectResponse(url="/dashboard", status_code=303)
+        # Legacy form POST: lock first-login users on the change-password page.
+        dest = "/change-password" if user.get("must_change_password") else "/dashboard"
+        redir = RedirectResponse(url=dest, status_code=303)
         redir.set_cookie(SESSION_COOKIE, make_session(user), **flags)
         if remember_me:
             redir.set_cookie("remember_me_id", username, max_age=28 * 24 * 3600, **flags)
