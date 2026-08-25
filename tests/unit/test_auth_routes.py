@@ -150,6 +150,84 @@ async def test_session_check_includes_must_change_false(client):
 
 
 @pytest.mark.asyncio
+async def test_session_check_includes_must_change_true(must_change_client):
+    resp = await must_change_client.get("/session-check")
+    assert resp.status_code == 200
+    assert resp.json()["must_change_password"] is True
+
+
+@pytest.mark.asyncio
+async def test_must_change_json_api_is_forbidden(must_change_client):
+    resp = await must_change_client.get(
+        "/users/search",
+        headers={"Accept": "application/json"},
+    )
+    assert resp.status_code == 403
+    body = resp.json()
+    assert body.get("must_change_password") is True
+    assert "password" in (body.get("error") or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_must_change_lines_and_trunks_json_are_forbidden(must_change_client):
+    """List pages use Accept: application/json; a 403 object must not be served as HTML."""
+    for path in ("/lines/search?q=", "/trunks/search?q="):
+        resp = await must_change_client.get(path, headers={"Accept": "application/json"})
+        assert resp.status_code == 403, path
+        assert resp.json().get("must_change_password") is True
+
+
+@pytest.mark.asyncio
+async def test_must_change_html_app_page_redirects_to_change_password(must_change_client):
+    resp = await must_change_client.get(
+        "/dashboard",
+        headers={"Accept": "text/html"},
+    )
+    assert resp.status_code in (302, 303, 307)
+    assert resp.headers.get("location", "").endswith("/change-password")
+
+
+@pytest.mark.asyncio
+async def test_must_change_login_get_does_not_enter_dashboard(must_change_client):
+    resp = await must_change_client.get("/login", follow_redirects=False)
+    assert resp.status_code in (302, 303, 307)
+    assert "/change-password" in resp.headers.get("location", "")
+    assert "/dashboard" not in resp.headers.get("location", "")
+
+
+@pytest.mark.asyncio
+async def test_must_change_change_password_page_is_allowed(must_change_client):
+    resp = await must_change_client.get("/change-password")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_existing_user_html_and_json_are_not_locked(client):
+    html = await client.get("/dashboard", headers={"Accept": "text/html"})
+    assert html.status_code == 200
+    api = await client.get("/session-check", headers={"Accept": "application/json"})
+    assert api.status_code == 200
+    assert api.json()["must_change_password"] is False
+
+
+@pytest.mark.asyncio
+async def test_form_login_with_must_change_redirects_to_change_password(
+    anon_client, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MUST_CHANGE_PASSWORD_FILE", str(tmp_path / "flags.json"))
+    import password_policy
+    password_policy.reset_store()
+    password_policy.mark_must_change("admin")
+    resp = await anon_client.post(
+        "/login",
+        data={"username": "admin", "password": "admin"},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    assert resp.headers.get("location", "").endswith("/change-password")
+
+
+@pytest.mark.asyncio
 async def test_reset_password_rejects_weak_new_password(client):
     resp = await client.post(
         "/reset-password",

@@ -16,6 +16,14 @@
     submitting: false
   };
   var fetchWrapped = false;
+  // Invalidates in-flight /session-check so a stale 401 from /login cannot
+  // clear a lock that login just set.
+  var checkGen = 0;
+
+  var EYE_OFF =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>';
+  var EYE_ON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>';
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -29,6 +37,25 @@
 
   function isLogin() {
     return pathOf() === "/login";
+  }
+
+  function lockUrl(url) {
+    if (!state.must) return url;
+    var next = "/";
+    if (url == null || url === "") {
+      next = pathOf();
+    } else {
+      try {
+        next = new URL(String(url), location.origin).pathname.replace(/\/+$/, "") || "/";
+      } catch (e) {
+        next = String(url).split("?")[0].replace(/\/+$/, "") || "/";
+      }
+    }
+    if (next === "/login" || next === "/change-password" || next === "/reset-password" || next === "/logout") {
+      return url;
+    }
+    // Stay on /login if that is the current page so first login never enters the app.
+    return isLogin() ? "/login" : "/change-password";
   }
 
   function isUserForm() {
@@ -116,18 +143,11 @@
     return !!(data && typeof data === "object" && !Array.isArray(data) && data.must_change_password);
   }
 
-  function applyMustChangeGate(res, method) {
+  function applyMustChangeGate(res) {
     if (res.status === 403 || ((res.headers && res.headers.get && (res.headers.get("content-type") || "")).indexOf("json") !== -1)) {
       return res.clone().json().then(function (data) {
         if (!looksLikeMustChange(data)) return res;
-        state.must = true;
-        state.checked = true;
-        showForce();
-        // Prevent list pages from calling .map on {error, must_change_password}.
-        // Only rewrite must-change 403s so real errors stay visible for other users.
-        if (res.status === 403 && method === "GET") {
-          return jsonResponse(403, []);
-        }
+        lockSession();
         return res;
       }).catch(function () { return res; });
     }
@@ -169,9 +189,7 @@
         if (method === "POST" && (pathname === "/login" || pathname === "/api/user/login")) {
           res.clone().json().then(function (data) {
             if (data && data.must_change_password) {
-              state.must = true;
-              state.checked = true;
-              showForce();
+              lockSession();
             } else if (data && data.username) {
               state.must = false;
               state.checked = true;
@@ -183,7 +201,7 @@
           state.must = false;
           hideForce();
         }
-        return applyMustChangeGate(res, method);
+        return applyMustChangeGate(res);
       });
     };
   }
@@ -259,26 +277,72 @@
         '<h2 id="pw-force-title">Change your password</h2>' +
         '<p class="pw-lead">You must set a new password before using the app.</p>' +
         '<label for="pw-cur">Current Password</label>' +
-        '<input id="pw-cur" type="password" autocomplete="current-password" />' +
+        passwordFieldHtml("pw-cur", "current-password") +
         '<label for="pw-new">New Password</label>' +
-        '<input id="pw-new" type="password" autocomplete="new-password" />' +
+        passwordFieldHtml("pw-new", "new-password") +
         '<ul class="pw-rules">' +
           RULES.map(function (r) { return "<li>" + escapeHtml(r) + "</li>"; }).join("") +
         "</ul>" +
         '<label for="pw-confirm">Confirm New Password</label>' +
-        '<input id="pw-confirm" type="password" autocomplete="new-password" />' +
+        passwordFieldHtml("pw-confirm", "new-password") +
         '<div class="pw-err hidden" id="pw-force-err"></div>' +
         '<div class="pw-actions"><button type="button" id="pw-force-save">Change Password</button></div>' +
       "</div>";
     document.body.appendChild(el);
+    bindEyeToggles(el);
     el.querySelector("#pw-force-save").addEventListener("click", submitForce);
     el.addEventListener("keydown", function (ev) {
       if (ev.key === "Enter") submitForce();
     });
   }
 
+  function passwordFieldHtml(id, autocomplete) {
+    return (
+      '<div class="pw-field">' +
+        '<input id="' + id + '" type="password" autocomplete="' + autocomplete + '" />' +
+        '<button type="button" class="pw-eye" aria-label="Show password" aria-pressed="false">' +
+          EYE_OFF +
+        "</button>" +
+      "</div>"
+    );
+  }
+
+  function bindEyeToggles(root) {
+    var buttons = root.querySelectorAll(".pw-eye");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].addEventListener("click", function (ev) {
+        ev.preventDefault();
+        var btn = ev.currentTarget;
+        var field = btn.parentElement && btn.parentElement.querySelector("input");
+        if (!field) return;
+        var hide = field.type === "text";
+        field.type = hide ? "password" : "text";
+        btn.setAttribute("aria-pressed", hide ? "false" : "true");
+        btn.setAttribute("aria-label", hide ? "Show password" : "Hide password");
+        btn.innerHTML = hide ? EYE_OFF : EYE_ON;
+      });
+    }
+  }
+
+  function lockSession() {
+    state.must = true;
+    state.checked = true;
+    checkGen += 1;
+    showForce();
+    // Full navigation so the SPA cannot mount dashboard/list pages first.
+    if (pathOf() !== "/change-password" && pathOf() !== "/reset-password") {
+      window.location.replace("/change-password");
+    }
+  }
+
+  function stayOnLockPage() {
+    if (!state.must) return;
+    if (pathOf() === "/change-password" || pathOf() === "/reset-password") return;
+    window.location.replace("/change-password");
+  }
+
   function showForce() {
-    if (isLogin() || !state.must) {
+    if (!state.must) {
       hideForce();
       return;
     }
@@ -352,13 +416,10 @@
   }
 
   async function refreshFlag() {
-    // On /login only hide the overlay. Do not clear state.must and do not
-    // skip /session-check — after SPA login the session already exists.
-    if (isLogin()) {
-      hideForce();
-    }
+    var gen = ++checkGen;
     try {
       var res = await fetch("/session-check", { credentials: "include" });
+      if (gen !== checkGen) return;
       if (res.status === 401) {
         state.must = false;
         hideForce();
@@ -366,17 +427,21 @@
       }
       if (!res.ok) return;
       var data = await res.json();
+      if (gen !== checkGen) return;
       state.must = !!(data && data.must_change_password);
       state.checked = true;
-      if (state.must) showForce();
-      else hideForce();
+      if (state.must) {
+        showForce();
+        stayOnLockPage();
+      } else {
+        hideForce();
+      }
     } catch (e) {}
   }
 
   function tick() {
     injectRules();
-    if (state.must && !isLogin()) showForce();
-    if (isLogin()) hideForce();
+    if (state.must) showForce();
   }
 
   function onNav() {
@@ -387,21 +452,25 @@
   function start() {
     wrapFetch();
     ensureForce();
+    var wrapPush = history.pushState;
+    var wrapReplace = history.replaceState;
+    history.pushState = function (data, unused, url) {
+      wrapPush.call(this, data, unused, lockUrl(url));
+      setTimeout(onNav, 0);
+    };
+    history.replaceState = function (data, unused, url) {
+      wrapReplace.call(this, data, unused, lockUrl(url));
+      setTimeout(onNav, 0);
+    };
+    if (pathOf() === "/change-password") {
+      state.must = true;
+      showForce();
+    }
     refreshFlag();
     tick();
     setInterval(tick, 400);
     setInterval(refreshFlag, 15000);
     window.addEventListener("popstate", onNav);
-    var wrapPush = history.pushState;
-    var wrapReplace = history.replaceState;
-    history.pushState = function () {
-      wrapPush.apply(this, arguments);
-      setTimeout(onNav, 0);
-    };
-    history.replaceState = function () {
-      wrapReplace.apply(this, arguments);
-      setTimeout(onNav, 0);
-    };
     var obs = new MutationObserver(function () {
       injectRules();
     });
