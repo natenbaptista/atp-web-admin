@@ -108,8 +108,10 @@
 #lg-overlay .lg-empty p { margin: 0 0 14px; }
 #lg-overlay .lg-empty .lg-btn { display: inline-block; }
 
-/* Hide SPA empty chrome; kill pointer events so it cannot steal clicks */
-body.lg-overlay-on table:not(#lg-table) { display: none !important; }
+/* Hide SPA empty chrome ONLY while the Line Groups overlay is in the document.
+   Must never hide Users/Lines/Trunks tables if lg-overlay-on leaks off this page. */
+body.lg-overlay-on:has(#lg-overlay) table:not(#lg-table),
+body.lg-overlay-on:has(#lg-host) table:not(#lg-table) { display: none !important; }
 body.lg-overlay-on .lg-hide-spa {
   display: none !important;
   pointer-events: none !important;

@@ -112,6 +112,28 @@
     });
   }
 
+  function looksLikeMustChange(data) {
+    return !!(data && typeof data === "object" && !Array.isArray(data) && data.must_change_password);
+  }
+
+  function applyMustChangeGate(res, method) {
+    if (res.status === 403 || ((res.headers && res.headers.get && (res.headers.get("content-type") || "")).indexOf("json") !== -1)) {
+      return res.clone().json().then(function (data) {
+        if (!looksLikeMustChange(data)) return res;
+        state.must = true;
+        state.checked = true;
+        showForce();
+        // Prevent list pages from calling .map on {error, must_change_password}.
+        // Only rewrite must-change 403s so real errors stay visible for other users.
+        if (res.status === 403 && method === "GET") {
+          return jsonResponse(403, []);
+        }
+        return res;
+      }).catch(function () { return res; });
+    }
+    return Promise.resolve(res);
+  }
+
   function wrapFetch() {
     if (fetchWrapped || typeof window.fetch !== "function") return;
     fetchWrapped = true;
@@ -161,7 +183,7 @@
           state.must = false;
           hideForce();
         }
-        return res;
+        return applyMustChangeGate(res, method);
       });
     };
   }
@@ -330,10 +352,10 @@
   }
 
   async function refreshFlag() {
+    // On /login only hide the overlay. Do not clear state.must and do not
+    // skip /session-check — after SPA login the session already exists.
     if (isLogin()) {
-      state.must = false;
       hideForce();
-      return;
     }
     try {
       var res = await fetch("/session-check", { credentials: "include" });
@@ -357,6 +379,11 @@
     if (isLogin()) hideForce();
   }
 
+  function onNav() {
+    tick();
+    refreshFlag();
+  }
+
   function start() {
     wrapFetch();
     ensureForce();
@@ -364,19 +391,16 @@
     tick();
     setInterval(tick, 400);
     setInterval(refreshFlag, 15000);
-    window.addEventListener("popstate", function () {
-      tick();
-      refreshFlag();
-    });
+    window.addEventListener("popstate", onNav);
     var wrapPush = history.pushState;
     var wrapReplace = history.replaceState;
     history.pushState = function () {
       wrapPush.apply(this, arguments);
-      setTimeout(tick, 0);
+      setTimeout(onNav, 0);
     };
     history.replaceState = function () {
       wrapReplace.apply(this, arguments);
-      setTimeout(tick, 0);
+      setTimeout(onNav, 0);
     };
     var obs = new MutationObserver(function () {
       injectRules();
