@@ -94,41 +94,144 @@
     }
   }
 
-  function passwordFromBody(body) {
-    if (!body) return { password: "", new_password: "", current_password: "" };
-    if (typeof body === "string") {
-      var trimmed = body.replace(/^\s+/, "");
-      if (trimmed.charAt(0) === "{") {
-        try {
-          var obj = JSON.parse(body);
-          return {
-            password: obj.password || "",
-            new_password: obj.new_password || "",
-            current_password: obj.current_password || ""
-          };
-        } catch (e) {}
-      }
-      try {
-        var p = new URLSearchParams(body);
-        return {
-          password: p.get("password") || "",
-          new_password: p.get("new_password") || "",
-          current_password: p.get("current_password") || ""
-        };
-      } catch (e) {}
-    }
-    if (typeof FormData !== "undefined" && body instanceof FormData) {
-      return {
-        password: body.get("password") || "",
-        new_password: body.get("new_password") || "",
-        current_password: body.get("current_password") || ""
-      };
-    }
+  var PW_KEYS = ["password", "user_password", "userPassword", "user[password]"];
+  var NEW_PW_KEYS = ["new_password", "newPassword"];
+  var CUR_PW_KEYS = ["current_password", "currentPassword"];
+
+  function emptyPwFields() {
     return { password: "", new_password: "", current_password: "" };
   }
 
+  function firstKey(get, keys) {
+    for (var i = 0; i < keys.length; i++) {
+      var v = get(keys[i]);
+      if (v != null && String(v) !== "") return String(v);
+    }
+    return "";
+  }
+
+  function fieldsFromGet(get, nestedGet) {
+    var fields = {
+      password: firstKey(get, PW_KEYS),
+      new_password: firstKey(get, NEW_PW_KEYS),
+      current_password: firstKey(get, CUR_PW_KEYS)
+    };
+    if (!fields.password && nestedGet) {
+      fields.password = firstKey(nestedGet, PW_KEYS);
+    }
+    return fields;
+  }
+
+  function fieldsFromObject(obj) {
+    if (!obj || typeof obj !== "object") return emptyPwFields();
+    return fieldsFromGet(
+      function (k) { return obj[k]; },
+      obj.user && typeof obj.user === "object"
+        ? function (k) { return obj.user[k]; }
+        : null
+    );
+  }
+
+  function fieldsFromString(body) {
+    var trimmed = String(body).replace(/^\s+/, "");
+    if (trimmed.charAt(0) === "{") {
+      try { return fieldsFromObject(JSON.parse(body)); } catch (e) {}
+    }
+    try {
+      var p = new URLSearchParams(body);
+      return fieldsFromGet(function (k) { return p.get(k); }, null);
+    } catch (e) {}
+    return emptyPwFields();
+  }
+
+  // readable: false means we could not parse a password payload (not "blank password").
+  function passwordFromBody(body) {
+    if (body == null) return { fields: emptyPwFields(), readable: false };
+    if (body === "") return { fields: emptyPwFields(), readable: true };
+    if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+      return { fields: fieldsFromGet(function (k) { return body.get(k); }, null), readable: true };
+    }
+    if (typeof FormData !== "undefined" && body instanceof FormData) {
+      return { fields: fieldsFromGet(function (k) { return body.get(k); }, null), readable: true };
+    }
+    if (typeof body === "string") {
+      return { fields: fieldsFromString(body), readable: true };
+    }
+    return { fields: emptyPwFields(), readable: false };
+  }
+
+  function passwordFromDom() {
+    if (typeof document === "undefined") return "";
+    var label = findLabel("User Password");
+    if (label) {
+      var box = fieldContainer(label);
+      var input = box && box.querySelector &&
+        box.querySelector("input[type='password'], input[type='text']");
+      if (input && input.value) return String(input.value);
+    }
+    var named = document.querySelector(
+      "input[name='password'], input[name='user_password'], input[name='userPassword']"
+    );
+    return named && named.value ? String(named.value) : "";
+  }
+
+  function bytesToText(body) {
+    try {
+      var bytes = null;
+      if (typeof ArrayBuffer !== "undefined" && body instanceof ArrayBuffer) {
+        bytes = new Uint8Array(body);
+      } else if (typeof ArrayBuffer !== "undefined" && ArrayBuffer.isView && ArrayBuffer.isView(body)) {
+        bytes = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+      }
+      if (!bytes) return null;
+      return typeof TextDecoder !== "undefined"
+        ? new TextDecoder().decode(bytes)
+        : String.fromCharCode.apply(null, bytes);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function resolvePasswordFields(input, init) {
+    var body = init && init.body;
+    var parsed = passwordFromBody(body);
+    if (parsed.readable) return Promise.resolve(parsed.fields);
+
+    function useDom() {
+      var fields = emptyPwFields();
+      fields.password = passwordFromDom();
+      return fields;
+    }
+
+    if (typeof Request !== "undefined" && input instanceof Request && !input.bodyUsed) {
+      try {
+        return input.clone().text().then(function (text) {
+          var fromReq = passwordFromBody(text);
+          return fromReq.readable ? fromReq.fields : useDom();
+        }).catch(useDom);
+      } catch (e) {
+        return Promise.resolve(useDom());
+      }
+    }
+
+    if (body && typeof Blob !== "undefined" && body instanceof Blob && typeof body.text === "function") {
+      return body.text().then(function (text) {
+        var fromBlob = passwordFromBody(text);
+        return fromBlob.readable ? fromBlob.fields : useDom();
+      }).catch(useDom);
+    }
+
+    var decoded = bytesToText(body);
+    if (decoded != null) {
+      var fromBytes = passwordFromBody(decoded);
+      if (fromBytes.readable) return Promise.resolve(fromBytes.fields);
+    }
+
+    return Promise.resolve(useDom());
+  }
+
   function isUserSavePath(pathname) {
-    return /\/users\/add$/.test(pathname) ||
+    return /\/users\/(add|new)$/.test(pathname) ||
       /\/users\/[^/]+\/(edit|copy)$/.test(pathname);
   }
 
@@ -160,49 +263,60 @@
     var orig = window.fetch;
     window.fetch = function (input, init) {
       init = init || {};
+      var args = arguments;
+      var self = this;
       var url = urlString(input);
       var pathname = pathFromUrl(url);
       var method = String(init.method || (input && input.method) || "GET").toUpperCase();
-      if (method === "POST" && isUserSavePath(pathname)) {
-        var fields = passwordFromBody(init.body);
-        var isEdit = /\/users\/[^/]+\/edit$/.test(pathname);
-        if (fields.password) {
-          if (!passwordValid(fields.password)) {
-            showInlineError(RULES_ERROR);
-            return Promise.resolve(jsonResponse(422, { errors: { password: RULES_ERROR } }));
+
+      function passThrough() {
+        return orig.apply(self, args).then(function (res) {
+          if (method === "POST" && (pathname === "/login" || pathname === "/api/user/login")) {
+            res.clone().json().then(function (data) {
+              if (data && data.must_change_password) {
+                lockSession();
+              } else if (data && data.username) {
+                state.must = false;
+                state.checked = true;
+                hideForce();
+              }
+            }).catch(function () {});
           }
-        } else if (!isEdit) {
-          showInlineError("Password is required.");
-          return Promise.resolve(jsonResponse(422, { errors: { password: "Password is required." } }));
-        }
+          if (method === "POST" && (pathname === "/reset-password" || pathname === "/change-password") && res.ok) {
+            state.must = false;
+            hideForce();
+          }
+          return applyMustChangeGate(res);
+        });
+      }
+
+      if (method === "POST" && isUserSavePath(pathname)) {
+        var isEdit = /\/users\/[^/]+\/edit$/.test(pathname);
+        return resolvePasswordFields(input, init).then(function (fields) {
+          if (fields.password) {
+            if (!passwordValid(fields.password)) {
+              showInlineError(RULES_ERROR);
+              return jsonResponse(422, { errors: { password: RULES_ERROR } });
+            }
+          } else if (!isEdit) {
+            showInlineError("Password is required.");
+            return jsonResponse(422, { errors: { password: "Password is required." } });
+          }
+          return passThrough();
+        });
       }
       if (method === "POST" && (pathname === "/reset-password" || pathname === "/change-password")) {
-        var rp = passwordFromBody(init.body);
-        if (rp.new_password && !passwordValid(rp.new_password)) {
-          return Promise.resolve(jsonResponse(400, { error: RULES_ERROR }));
-        }
-        if (rp.new_password && rp.current_password && rp.new_password === rp.current_password) {
-          return Promise.resolve(jsonResponse(400, { error: SAME_ERROR }));
-        }
+        return resolvePasswordFields(input, init).then(function (rp) {
+          if (rp.new_password && !passwordValid(rp.new_password)) {
+            return jsonResponse(400, { error: RULES_ERROR });
+          }
+          if (rp.new_password && rp.current_password && rp.new_password === rp.current_password) {
+            return jsonResponse(400, { error: SAME_ERROR });
+          }
+          return passThrough();
+        });
       }
-      return orig.apply(this, arguments).then(function (res) {
-        if (method === "POST" && (pathname === "/login" || pathname === "/api/user/login")) {
-          res.clone().json().then(function (data) {
-            if (data && data.must_change_password) {
-              lockSession();
-            } else if (data && data.username) {
-              state.must = false;
-              state.checked = true;
-              hideForce();
-            }
-          }).catch(function () {});
-        }
-        if (method === "POST" && (pathname === "/reset-password" || pathname === "/change-password") && res.ok) {
-          state.must = false;
-          hideForce();
-        }
-        return applyMustChangeGate(res);
-      });
+      return passThrough();
     };
   }
 
