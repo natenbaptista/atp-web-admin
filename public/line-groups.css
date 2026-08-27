@@ -121,6 +121,15 @@ body.lg-overlay-on .lg-hide-spa {
   overflow: hidden !important;
   border: 0 !important;
 }
+/* If hideSpaEmpty wrongly marks an ancestor of the overlay, keep that ancestor
+   visible so /lines/groups cannot flash-then-blank. */
+body.lg-overlay-on .lg-hide-spa:has(#lg-overlay),
+body.lg-overlay-on .lg-hide-spa:has(#lg-host) {
+  display: revert !important;
+  pointer-events: auto !important;
+  height: auto !important;
+  overflow: visible !important;
+}
 
 .lg-modal-bg {
   position: fixed;
