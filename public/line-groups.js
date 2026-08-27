@@ -131,6 +131,34 @@
     return false;
   }
 
+  function containsOurs(el) {
+    if (!el) return false;
+    if (isOurs(el)) return true;
+    if (!el.querySelector) return false;
+    return !!(el.querySelector("#" + ROOT_ID) || el.querySelector("#lg-host") || el.querySelector("#lg-modal-bg"));
+  }
+
+  function normalizeLabel(el) {
+    return (el && el.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isEmptyLabel(t) {
+    return t === "No line groups configured" || t === "No line groups configured.";
+  }
+
+  function isAddLabel(t) {
+    return (
+      t === "+ Add Line Group" || t === "Add Line Group" ||
+      t === "+ New line group" || t === "New line group" ||
+      t === "+ New Line Group" || t === "New Line Group"
+    );
+  }
+
+  function hideTarget(el) {
+    if (!el || isOurs(el) || containsOurs(el)) return;
+    el.classList.add("lg-hide-spa");
+  }
+
   function hideSpaEmpty() {
     var root = document.getElementById(ROOT_ID);
     if (!root) return;
@@ -141,30 +169,32 @@
     var walk = document.querySelectorAll("h1, h2, h3, p, div, span, button, section, article");
     for (var i = 0; i < walk.length; i++) {
       var el = walk[i];
-      if (isOurs(el)) continue;
-      var t = (el.textContent || "").replace(/\s+/g, " ").trim();
-      var isEmpty = t === "No line groups configured" || t === "No line groups configured.";
-      var isAdd = t === "+ Add Line Group" || t === "Add Line Group";
+      if (isOurs(el) || containsOurs(el)) continue;
+      var t = normalizeLabel(el);
+      var isEmpty = isEmptyLabel(t);
+      var isAdd = isAddLabel(t);
       if (!isEmpty && !isAdd) continue;
       if (isAdd && el.tagName === "BUTTON") {
-        el.classList.add("lg-hide-spa");
+        hideTarget(el);
+        // Only hide a tight button-only wrap — never the header row that also
+        // holds #lg-host (that was blanking the overlay after first paint).
         var wrap = el.parentElement;
-        if (wrap && !isOurs(wrap)) wrap.classList.add("lg-hide-spa");
+        if (wrap && isAddLabel(normalizeLabel(wrap))) hideTarget(wrap);
         continue;
       }
       var box = el;
       for (var up = 0; up < 6 && box && box.parentElement; up++) {
         var parent = box.parentElement;
-        if (isOurs(parent)) break;
+        if (isOurs(parent) || containsOurs(parent)) break;
         if (parent.tagName === "MAIN" || parent.id === "root" || parent === document.body) break;
-        var pt = (parent.textContent || "").replace(/\s+/g, " ").trim();
+        var pt = normalizeLabel(parent);
         if (pt.indexOf("No line groups configured") >= 0 && pt.length < 160) {
           box = parent;
           continue;
         }
-        box = parent;
+        break;
       }
-      if (box && !isOurs(box)) box.classList.add("lg-hide-spa");
+      hideTarget(box);
     }
   }
 
@@ -484,30 +514,69 @@
     });
   }
 
+  function isChromeHeader(el) {
+    var p = el;
+    while (p && p !== document.body) {
+      if (p.tagName === "HEADER") return true;
+      p = p.parentElement;
+    }
+    return false;
+  }
+
   function findHeading() {
     var prefer = null;
     var nodes = document.querySelectorAll("h1, h2, h3");
     for (var i = 0; i < nodes.length; i++) {
-      var t = (nodes[i].textContent || "").replace(/\s+/g, " ").trim();
+      if (isOurs(nodes[i])) continue;
+      var t = normalizeLabel(nodes[i]);
       if (t === "Line Groups") return nodes[i];
-      if (t === "Lines" && !prefer) prefer = nodes[i];
+      if (t === "Lines" && !prefer && !isChromeHeader(nodes[i])) prefer = nodes[i];
     }
     return prefer;
   }
 
+  function isToolbarRow(row, heading) {
+    if (!row || !heading || isOurs(row) || containsOurs(row)) return false;
+    if (row.tagName === "MAIN" || row.id === "root" || row === document.body) return false;
+    if (normalizeLabel(row).length > 80) return false;
+    var kids = row.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var kid = kids[i];
+      if (kid === heading) continue;
+      if (kid.tagName === "BUTTON" || (kid.querySelector && kid.querySelector("button"))) return true;
+    }
+    return false;
+  }
+
+  function placeHost(host) {
+    var heading = findHeading();
+    var after = heading;
+    if (heading && isToolbarRow(heading.parentElement, heading)) {
+      after = heading.parentElement;
+    }
+    if (after && after.parentNode) {
+      if (host.previousElementSibling !== after || host.parentNode !== after.parentNode) {
+        after.parentNode.insertBefore(host, after.nextSibling);
+      }
+      return host;
+    }
+    var main = document.querySelector("main") || document.getElementById("root") || document.body;
+    if (host.parentNode !== main) {
+      main.insertBefore(host, main.firstChild);
+    }
+    return host;
+  }
+
   function ensureHost() {
     var host = document.getElementById("lg-host");
-    if (host) return host;
+    if (host) {
+      placeHost(host);
+      return host;
+    }
     host = document.createElement("div");
     host.id = "lg-host";
     host.className = "lg-host";
-    var heading = findHeading();
-    if (heading && heading.parentNode) {
-      heading.parentNode.insertBefore(host, heading.nextSibling);
-    } else {
-      var main = document.querySelector("main") || document.getElementById("root") || document.body;
-      main.insertBefore(host, main.firstChild);
-    }
+    placeHost(host);
     return host;
   }
 
@@ -536,11 +605,6 @@
     document.body.classList.add("lg-overlay-on");
     ensureModal();
     var host = ensureHost();
-    // Keep host right under the page heading if SPA remounted siblings
-    var heading = findHeading();
-    if (heading && heading.parentNode && host.previousElementSibling !== heading) {
-      heading.parentNode.insertBefore(host, heading.nextSibling);
-    }
     var existing = document.getElementById(ROOT_ID);
     if (existing) {
       if (existing.parentNode !== host) host.appendChild(existing);
@@ -611,6 +675,18 @@
       if (isPage()) hideSpaEmpty();
     });
     obs.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  if (typeof window !== "undefined" && window.__LG_TEST__) {
+    window.__lgTest = {
+      hideSpaEmpty: hideSpaEmpty,
+      mount: mount,
+      teardown: teardown,
+      isPage: isPage,
+      ensureHost: ensureHost,
+      containsOurs: containsOurs,
+      state: state
+    };
   }
 
   if (document.readyState === "loading") {
