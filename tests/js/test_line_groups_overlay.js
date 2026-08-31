@@ -749,9 +749,12 @@ async function main() {
     if (mainLabels.length !== 1) {
       throw new Error("expected one Main Line label, got " + mainLabels.length);
     }
-    env.test.state.main = "2401";
+    env.test.state.main = "";
     env.test.state.qMain = "2401";
     env.test.renderModal();
+    if (env.test.state.main !== "2401") {
+      throw new Error("exact Main Line type-in should auto-commit, got " + env.test.state.main);
+    }
     const sm = bg.querySelector("#lg-suggest-main");
     if (sm && !sm.classList.contains("hidden") && sm.children.length) {
       throw new Error("committed Main Line still shows a second suggest editor");

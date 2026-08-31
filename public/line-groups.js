@@ -320,6 +320,13 @@
     });
     var sm = bg.querySelector("#lg-suggest-main");
     var ss = bg.querySelector("#lg-suggest-sub");
+    if (state.mode === "add" && !state.main) {
+      var typedExact = canonicalLineName(state.qMain);
+      if (typedExact && state.lines.indexOf(typedExact) >= 0) {
+        state.main = typedExact;
+        state.qMain = typedExact;
+      }
+    }
     var mainCommitted = !!(state.main && state.main === canonicalLineName(state.qMain));
     if (state.mode === "add" && !mainCommitted && (state.qMain || document.activeElement === mainInp)) {
       var mains = suggestMain();
