@@ -26,23 +26,32 @@
     });
   }
 
+  // Virtual-line appearances are stored as "<line>--<n>" (e.g. 2407--1).
+  // Line Groups operate on the real line name; never display or POST --N.
+  function canonicalLineName(name) {
+    var s = String(name == null ? "" : name).trim();
+    if (!s) return "";
+    var m = s.match(/^(.*)--(\d+)$/);
+    return m ? m[1] : s;
+  }
+
   function groupMain(g) {
     if (!g || typeof g !== "object") return "";
-    return String(g.main_line || g.main || g.name || "").trim();
+    return canonicalLineName(g.main_line || g.main || g.name || "");
   }
 
   function groupSubs(g) {
     if (!g || typeof g !== "object") return [];
     var raw = g.sub_lines != null ? g.sub_lines : (g.subs != null ? g.subs : g.lines);
     if (typeof raw === "string") {
-      return raw.split(",").map(function (s) { return s.trim(); }).filter(Boolean);
+      return raw.split(",").map(function (s) { return canonicalLineName(s); }).filter(Boolean);
     }
     if (!Array.isArray(raw)) return [];
     return raw.map(function (item) {
       if (item && typeof item === "object") {
-        return String(item.name || item.dn || item.line || item.linename || "").trim();
+        return canonicalLineName(item.name || item.dn || item.line || item.linename || "");
       }
-      return String(item || "").trim();
+      return canonicalLineName(item);
     }).filter(Boolean);
   }
 
@@ -55,12 +64,30 @@
     return set;
   }
 
-  function existingSubs() {
+  function existingSubs(exceptMain) {
     var set = {};
     state.groups.forEach(function (g) {
+      if (exceptMain && groupMain(g) === exceptMain) return;
       groupSubs(g).forEach(function (s) { set[s] = true; });
     });
     return set;
+  }
+
+  function collectLineNames(raw) {
+    var list = Array.isArray(raw) ? raw : (raw && (raw.items || raw.data));
+    if (!Array.isArray(list)) return [];
+    var names = [];
+    var seen = {};
+    list.forEach(function (x) {
+      var n = "";
+      if (typeof x === "string") n = x;
+      else if (x && typeof x === "object") n = x.dn || x.name || x.linename || "";
+      n = canonicalLineName(n);
+      if (!n || seen[n]) return;
+      seen[n] = true;
+      names.push(n);
+    });
+    return names;
   }
 
   function substringMatch(name, q) {
@@ -97,31 +124,19 @@
 
   async function loadLines() {
     var names = [];
+    // /lines/search returns real DNs. /lines/names is virtual_lines and
+    // includes appearance labels (2407--1); only use it as a fallback.
     try {
-      var out = await fetchJson("/lines/names");
-      if (out.res.ok && Array.isArray(out.data)) {
-        names = out.data.map(function (x) {
-          return typeof x === "string" ? x : (x && (x.name || x.dn) || "");
-        }).filter(Boolean);
-      }
+      var out2 = await fetchJson("/lines/search?q=&per_page=200");
+      if (out2.res.ok) names = collectLineNames(out2.data);
     } catch (e) {}
     if (!names.length) {
       try {
-        var out2 = await fetchJson("/lines/search?q=&per_page=200");
-        if (out2.res.ok) {
-          var items = Array.isArray(out2.data) ? out2.data : (out2.data.items || []);
-          names = items.map(function (x) {
-            return (x && (x.dn || x.name || x.linename)) || "";
-          }).filter(Boolean);
-        }
+        var out = await fetchJson("/lines/names");
+        if (out.res.ok) names = collectLineNames(out.data);
       } catch (e) {}
     }
-    var seen = {};
-    state.lines = names.filter(function (n) {
-      if (seen[n]) return false;
-      seen[n] = true;
-      return true;
-    });
+    state.lines = names;
   }
 
   function isOurs(el) {
@@ -196,14 +211,26 @@
       }
       hideTarget(box);
     }
+    hideSpaForeignDialogs();
+  }
+
+  function hideSpaForeignDialogs() {
+    var nodes = document.querySelectorAll("[role='dialog'], dialog");
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      if (isOurs(el) || containsOurs(el)) continue;
+      var t = normalizeLabel(el);
+      if (/line group/i.test(t) || /main line/i.test(t)) hideTarget(el);
+    }
   }
 
   function suggestMain() {
-    var q = state.qMain;
+    var q = canonicalLineName(state.qMain);
     var banned = existingSubs();
     var out = [];
     state.lines.forEach(function (n) {
-      if (banned[n]) return;
+      n = canonicalLineName(n);
+      if (!n || banned[n]) return;
       if (q && !substringMatch(n, q)) return;
       out.push(n);
     });
@@ -211,13 +238,16 @@
   }
 
   function suggestSub() {
-    var q = state.qSub;
+    var q = canonicalLineName(state.qSub);
     var banned = otherMains(state.main);
+    var taken = existingSubs(state.mode === "edit" ? state.main : "");
+    Object.keys(taken).forEach(function (s) { banned[s] = true; });
     banned[state.main] = true;
     state.subs.forEach(function (s) { banned[s] = true; });
     var out = [];
     state.lines.forEach(function (n) {
-      if (banned[n]) return;
+      n = canonicalLineName(n);
+      if (!n || banned[n]) return;
       if (q && !substringMatch(n, q)) return;
       out.push(n);
     });
@@ -290,7 +320,8 @@
     });
     var sm = bg.querySelector("#lg-suggest-main");
     var ss = bg.querySelector("#lg-suggest-sub");
-    if (state.mode === "add" && (state.qMain || document.activeElement === mainInp)) {
+    var mainCommitted = !!(state.main && state.main === canonicalLineName(state.qMain));
+    if (state.mode === "add" && !mainCommitted && (state.qMain || document.activeElement === mainInp)) {
       var mains = suggestMain();
       sm.innerHTML = mains.map(function (n) {
         return '<button type="button" data-val="' + escapeHtml(n) + '">' + escapeHtml(n) + "</button>";
@@ -300,8 +331,9 @@
         b.addEventListener("mousedown", function (ev) {
           ev.preventDefault();
           ev.stopPropagation();
-          state.main = b.dataset.val;
-          state.qMain = b.dataset.val;
+          var picked = canonicalLineName(b.dataset.val);
+          state.main = picked;
+          state.qMain = picked;
           state.subs = state.subs.filter(function (s) { return s !== state.main; });
           state.error = "";
           renderModal();
@@ -321,7 +353,14 @@
         b.addEventListener("mousedown", function (ev) {
           ev.preventDefault();
           ev.stopPropagation();
-          if (state.subs.indexOf(b.dataset.val) < 0) state.subs.push(b.dataset.val);
+          var picked = canonicalLineName(b.dataset.val);
+          if (existingSubs(state.mode === "edit" ? state.main : "")[picked]) {
+            state.error = "Sub line " + picked + " already belongs to another group.";
+            state.qSub = "";
+            renderModal();
+            return;
+          }
+          if (picked && state.subs.indexOf(picked) < 0) state.subs.push(picked);
           state.qSub = "";
           state.error = "";
           renderModal();
@@ -345,6 +384,7 @@
     state.qMain = mode === "edit" ? main : "";
     state.qSub = "";
     state.error = "";
+    hideSpaForeignDialogs();
     renderModal();
   }
 
@@ -354,13 +394,32 @@
     renderModal();
   }
 
+  function uniqueSubError(subs, exceptMain) {
+    var taken = existingSubs(exceptMain);
+    var clash = [];
+    (subs || []).forEach(function (s) {
+      s = canonicalLineName(s);
+      if (s && taken[s] && clash.indexOf(s) < 0) clash.push(s);
+    });
+    if (!clash.length) return "";
+    return "Sub line " + clash[0] + " already belongs to another group.";
+  }
+
   async function saveGroup() {
+    state.main = canonicalLineName(state.main || state.qMain);
+    state.subs = state.subs.map(canonicalLineName).filter(Boolean);
     if (state.mode === "add") {
       if (!state.main) {
         state.error = "Main line is required.";
         renderModal();
         return;
       }
+    }
+    var clash = uniqueSubError(state.subs, state.mode === "edit" ? state.main : "");
+    if (clash) {
+      state.error = clash;
+      renderModal();
+      return;
     }
     var url = state.mode === "edit"
       ? "/lines/groups/" + encodeURIComponent(state.main) + "/edit"
@@ -402,13 +461,14 @@
   }
 
   async function deleteGroup(main) {
+    main = canonicalLineName(main);
     if (!main) return;
     if (!window.confirm("Delete line group " + main + "?")) return;
     var opts = {
       method: "POST",
       credentials: "include",
       headers: { "Accept": "application/json", "Content-Type": "application/json" },
-      body: "{}"
+      body: JSON.stringify({ main_line: main })
     };
     var out;
     try {
@@ -482,7 +542,7 @@
     bg.querySelector("#lg-save").addEventListener("click", saveGroup);
     bg.querySelector("#lg-main").addEventListener("input", function (ev) {
       if (state.mode === "edit") return;
-      state.qMain = ev.target.value;
+      state.qMain = canonicalLineName(ev.target.value) || ev.target.value;
       state.main = "";
       state.error = "";
       renderModal();
@@ -493,7 +553,7 @@
       if (ev.key !== "Enter") return;
       ev.preventDefault();
       var mains = suggestMain();
-      var typed = (ev.target.value || "").trim();
+      var typed = canonicalLineName(ev.target.value);
       var pick = null;
       for (var i = 0; i < mains.length; i++) {
         if (mains[i] === typed) { pick = mains[i]; break; }
@@ -507,7 +567,7 @@
       renderModal();
     });
     bg.querySelector("#lg-sub").addEventListener("input", function (ev) {
-      state.qSub = ev.target.value;
+      state.qSub = canonicalLineName(ev.target.value) || ev.target.value;
       state.error = "";
       renderModal();
       bg.querySelector("#lg-sub").focus();
@@ -685,7 +745,17 @@
       isPage: isPage,
       ensureHost: ensureHost,
       containsOurs: containsOurs,
-      state: state
+      state: state,
+      canonicalLineName: canonicalLineName,
+      collectLineNames: collectLineNames,
+      suggestMain: suggestMain,
+      suggestSub: suggestSub,
+      existingSubs: existingSubs,
+      uniqueSubError: uniqueSubError,
+      deleteGroup: deleteGroup,
+      saveGroup: saveGroup,
+      openModal: openModal,
+      renderModal: renderModal
     };
   }
 
