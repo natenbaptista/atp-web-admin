@@ -1,10 +1,8 @@
 /**
- * Regression tests for public/line-groups.js hideSpaEmpty / host placement.
+ * Regression tests for public/line-groups.js.
  *
- * The Vite SPA paints "No line groups configured" + "Add Line Group" (or a
- * table + "+ New line group") first. hideSpaEmpty used to walk 6 ancestors
- * and hide the Add button's parent — the same row that now contains #lg-host —
- * so the overlay flashed then went blank.
+ * Covers hideSpaEmpty / host placement (PR #25) plus delete payload shape,
+ * unique sub-line, single MAIN LINE field, and --N appearance stripping.
  *
  * Run: node tests/js/test_line_groups_overlay.js
  */
@@ -429,14 +427,16 @@ function loadOverlay(opts) {
       return {
         ok: true,
         status: 200,
-        json: async function () { return ["2400", "2401", "2402"]; }
+        json: async function () { return opts.names != null ? opts.names : ["2400", "2401", "2402"]; }
       };
     }
     if (u.indexOf("/lines/search") >= 0) {
       return {
         ok: true,
         status: 200,
-        json: async function () { return { items: [] }; }
+        json: async function () {
+          return opts.search != null ? opts.search : { items: [] };
+        }
       };
     }
     if ((init && init.method === "POST") || /\/(add|edit|delete)/.test(u)) {
@@ -622,6 +622,142 @@ async function main() {
     }
     if (env.document.getElementById("lg-overlay")) {
       throw new Error("overlay should be removed off-page");
+    }
+  });
+
+  await check("delete POST body is {main_line} not empty object", async function () {
+    const env = loadOverlay({
+      withTable: true,
+      groups: [
+        { main_line: "2402", sub_lines: ["2406", "2403"] },
+        { main_line: "2404", sub_lines: ["2405", "2406"] }
+      ]
+    });
+    await flush(env);
+    const del = env.document.querySelector(".lg-del");
+    if (!del) throw new Error("missing Delete button");
+    env.fetchCalls.length = 0;
+    del.click();
+    await Promise.resolve();
+    const delCall = env.fetchCalls.find((c) => /\/delete/.test(c.url) && c.init.method === "POST");
+    if (!delCall) throw new Error("delete was not POSTed; calls=" + JSON.stringify(env.fetchCalls.map((c) => c.url)));
+    let body;
+    try { body = JSON.parse(delCall.init.body); } catch (e) {
+      throw new Error("delete body is not JSON: " + delCall.init.body);
+    }
+    if (body.main_line !== "2402") {
+      throw new Error("expected {main_line:'2402'}, got " + JSON.stringify(body));
+    }
+    if (Object.keys(body).join(",") !== "main_line") {
+      throw new Error("delete body should be only main_line, got " + JSON.stringify(body));
+    }
+  });
+
+  await check("picker strips --N appearance suffixes", async function () {
+    const env = loadOverlay({
+      names: [
+        { name: "2407--1", type: "Line" },
+        { name: "2407--2", type: "Line" },
+        { name: "2407--3", type: "Line" },
+        { name: "2401", type: "Line" }
+      ]
+    });
+    await flush(env);
+    if (env.test.state.lines.indexOf("2407--1") >= 0) {
+      throw new Error("state.lines still has appearance label 2407--1: " + env.test.state.lines.join(","));
+    }
+    if (env.test.state.lines.indexOf("2407") < 0) {
+      throw new Error("expected canonical 2407 in lines, got " + env.test.state.lines.join(","));
+    }
+    if (env.test.canonicalLineName("2407--2") !== "2407") {
+      throw new Error("canonicalLineName(2407--2) => " + env.test.canonicalLineName("2407--2"));
+    }
+    env.test.state.qSub = "2407";
+    env.test.state.main = "2401";
+    const sugg = env.test.suggestSub();
+    if (sugg.some((n) => /--\d+$/.test(n))) {
+      throw new Error("suggestSub offered appearance labels: " + sugg.join(","));
+    }
+    if (sugg.indexOf("2407") < 0) {
+      throw new Error("suggestSub should offer 2407, got " + sugg.join(","));
+    }
+    const collected = env.test.collectLineNames([
+      { name: "2407--1" }, { dn: "2407--2" }, "2407--3", "2407"
+    ]);
+    if (collected.join(",") !== "2407") {
+      throw new Error("collectLineNames should collapse appearances to 2407, got " + collected.join(","));
+    }
+  });
+
+  await check("unique sub-line is blocked in picker and save", async function () {
+    const env = loadOverlay({
+      withTable: true,
+      groups: [
+        { main_line: "2402", sub_lines: ["2406", "2403"] },
+        { main_line: "2404", sub_lines: ["2405", "2406"] }
+      ],
+      search: { items: [
+        { dn: "2401" }, { dn: "2402" }, { dn: "2403" },
+        { dn: "2404" }, { dn: "2405" }, { dn: "2406" }, { dn: "2407" }
+      ] }
+    });
+    await flush(env);
+    env.test.openModal("add");
+    env.test.state.main = "2401";
+    env.test.state.qMain = "2401";
+    env.test.state.qSub = "240";
+    const sugg = env.test.suggestSub();
+    if (sugg.indexOf("2406") >= 0) {
+      throw new Error("suggestSub offered already-used 2406: " + sugg.join(","));
+    }
+    if (sugg.indexOf("2403") >= 0 || sugg.indexOf("2405") >= 0) {
+      throw new Error("suggestSub offered other groups' subs: " + sugg.join(","));
+    }
+    const clash = env.test.uniqueSubError(["2406"], "");
+    if (!clash || clash.indexOf("2406") < 0) {
+      throw new Error("uniqueSubError should name 2406, got " + clash);
+    }
+    env.fetchCalls.length = 0;
+    env.test.state.subs = ["2406"];
+    await env.test.saveGroup();
+    const addCall = env.fetchCalls.find((c) => {
+      const u = c.url;
+      return c.init.method === "POST" && (u === "/lines/groups" || /\/add$/.test(u) || /\/edit$/.test(u));
+    });
+    if (addCall) {
+      throw new Error("save POSTed a used sub-line: " + addCall.init.body);
+    }
+    if (!env.test.state.error || env.test.state.error.indexOf("2406") < 0) {
+      throw new Error("expected unique-sub error, got " + env.test.state.error);
+    }
+  });
+
+  await check("Add modal has one MAIN LINE field, not two", async function () {
+    const env = loadOverlay({
+      search: { items: [{ dn: "2401" }, { dn: "2407" }] }
+    });
+    await flush(env);
+    env.test.openModal("add");
+    const bg = env.document.getElementById("lg-modal-bg");
+    if (!bg || bg.classList.contains("hidden")) throw new Error("modal hidden");
+    const mains = bg.querySelectorAll("#lg-main");
+    if (mains.length !== 1) {
+      throw new Error("expected one #lg-main, got " + mains.length);
+    }
+    const labels = bg.querySelectorAll("label");
+    const mainLabels = labels.filter((el) => /main line/i.test(el.textContent || ""));
+    if (mainLabels.length !== 1) {
+      throw new Error("expected one Main Line label, got " + mainLabels.length);
+    }
+    env.test.state.main = "";
+    env.test.state.qMain = "2401";
+    env.test.renderModal();
+    if (env.test.state.main !== "2401") {
+      throw new Error("exact Main Line type-in should auto-commit, got " + env.test.state.main);
+    }
+    const sm = bg.querySelector("#lg-suggest-main");
+    if (sm && !sm.classList.contains("hidden") && sm.children.length) {
+      throw new Error("committed Main Line still shows a second suggest editor");
     }
   });
 

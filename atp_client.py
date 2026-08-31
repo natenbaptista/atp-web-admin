@@ -596,7 +596,9 @@ async def line_group_update(group: dict) -> None:
 
 
 async def line_group_delete(main_line: str) -> None:
-    await _send_message("controller_line_group_delete", {"main_line": main_line})
+    # C++ controller_line_group_delete expects a plain string (the main line
+    # name). Sending {"main_line": "..."} yields "is not of the expected type".
+    await _send_message("controller_line_group_delete", str(main_line or "").strip())
 
 
 # ── Blacklist / Whitelist ─────────────────────────────────────────────────────

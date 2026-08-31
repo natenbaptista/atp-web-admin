@@ -25,6 +25,7 @@ import csv
 import io
 import os
 import pathlib
+import re
 import sqlite3
 from typing import Optional
 
@@ -63,10 +64,22 @@ _FWD_LEGACY = {
 }
 
 
+_APPEARANCE_SUFFIX = re.compile(r"^(.+)--(\d+)$")
+
+
+def _canonical_line_name(name) -> str:
+    """Strip virtual-line appearance suffixes like 2407--1 → 2407."""
+    s = str(name or "").strip()
+    if not s:
+        return ""
+    m = _APPEARANCE_SUFFIX.match(s)
+    return m.group(1) if m else s
+
+
 def _group_main(g) -> str:
     if not isinstance(g, dict):
         return ""
-    return str(g.get("main_line") or g.get("main") or g.get("name") or "").strip()
+    return _canonical_line_name(g.get("main_line") or g.get("main") or g.get("name") or "")
 
 
 def _group_subs(g) -> list:
@@ -76,17 +89,20 @@ def _group_subs(g) -> list:
         g.get("subs") if g.get("subs") is not None else g.get("lines", [])
     )
     if isinstance(raw, str):
-        return [s.strip() for s in raw.split(",") if s.strip()]
+        return [_canonical_line_name(s) for s in raw.split(",") if _canonical_line_name(s)]
     if not isinstance(raw, list):
         return []
     out = []
     for item in raw:
         if isinstance(item, dict):
             val = item.get("name") or item.get("dn") or item.get("line") or item.get("linename")
-            if val:
-                out.append(str(val).strip())
-        elif item is not None and str(item).strip():
-            out.append(str(item).strip())
+            name = _canonical_line_name(val)
+            if name:
+                out.append(name)
+        else:
+            name = _canonical_line_name(item)
+            if name:
+                out.append(name)
     return out
 
 
@@ -105,7 +121,7 @@ async def _read_group_body(request: Request, main_fallback: str = "") -> tuple:
             body = {}
         if not isinstance(body, dict):
             body = {}
-        main = str(body.get("main_line") or body.get("main") or main_fallback or "").strip()
+        main = _canonical_line_name(body.get("main_line") or body.get("main") or main_fallback or "")
         subs = body.get("sub_lines")
         if subs is None:
             subs = body.get("sub_lines[]")
@@ -114,16 +130,16 @@ async def _read_group_body(request: Request, main_fallback: str = "") -> tuple:
         if subs is None:
             subs = []
         if isinstance(subs, str):
-            subs = [s.strip() for s in subs.split(",") if s.strip()]
+            subs = [_canonical_line_name(s) for s in subs.split(",") if _canonical_line_name(s)]
         elif isinstance(subs, list):
-            subs = [str(s).strip() for s in subs if str(s).strip()]
+            subs = [_canonical_line_name(s) for s in subs if _canonical_line_name(s)]
         else:
             subs = []
         return main, subs
     form = await request.form()
-    main = str(form.get("main_line") or form.get("main") or main_fallback or "").strip()
+    main = _canonical_line_name(form.get("main_line") or form.get("main") or main_fallback or "")
     subs = form.getlist("sub_lines") or form.getlist("sub_lines[]") or form.getlist("subs")
-    return main, [str(s).strip() for s in subs if str(s).strip()]
+    return main, [_canonical_line_name(s) for s in subs if _canonical_line_name(s)]
 
 
 async def _validate_nesting(main: str, subs: list, *, editing: bool = False):
@@ -165,6 +181,22 @@ async def _validate_nesting(main: str, subs: list, *, editing: bool = False):
             {"result": "fail", "detail": "A main line cannot also be listed as a sub-line."},
             status_code=422,
         )
+    other_subs = set()
+    for g in groups:
+        gm = _group_main(g)
+        if editing and gm == main:
+            continue
+        for s in _group_subs(g):
+            other_subs.add(s)
+    taken = [s for s in subs if s in other_subs]
+    if taken:
+        return JSONResponse(
+            {
+                "result": "fail",
+                "detail": f"Sub line {taken[0]} already belongs to another group.",
+            },
+            status_code=422,
+        )
     return None
 
 
@@ -194,7 +226,7 @@ async def _lg_add(request: Request, session: dict, json_always: bool):
 
 async def _lg_edit(main_line: str, request: Request, session: dict, json_always: bool):
     body_main, sub_lines = await _read_group_body(request, main_fallback=main_line)
-    main_line = (main_line or body_main).strip()
+    main_line = _canonical_line_name(main_line or body_main)
     err = await _validate_nesting(main_line, sub_lines, editing=True)
     if err:
         return err
@@ -210,9 +242,8 @@ async def _lg_edit(main_line: str, request: Request, session: dict, json_always:
 
 
 async def _lg_delete(main_line: str, request: Request, session: dict, json_always: bool):
-    if not main_line:
-        body_main, _ = await _read_group_body(request)
-        main_line = body_main
+    body_main, _ = await _read_group_body(request, main_fallback=main_line)
+    main_line = _canonical_line_name(main_line or body_main)
     if not main_line:
         return JSONResponse({"result": "fail", "detail": "Main line is required."}, status_code=422)
     try:
