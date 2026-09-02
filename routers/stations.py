@@ -24,6 +24,7 @@ import asyncio
 import json
 import os
 import pathlib
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Request
@@ -38,6 +39,14 @@ PUBLIC_DIR = pathlib.Path(__file__).parent.parent / "public"
 
 _STATIONSLIST = Path("/var/tmp/stationslist")
 _ERRORS_FILE  = Path("/var/tmp/errors")
+
+# Vendor amp_station_installer --get-stations writes this canned line to
+# /var/tmp/errors when discovery finds nothing. It does not name packages.
+# Surfacing it as success:false makes a fresh AMP look broken.
+_GENERIC_MISSING_RE = re.compile(
+    r"Node install has missing software\(s\)!?",
+    re.IGNORECASE,
+)
 
 
 def _installer_binary() -> str:
@@ -106,6 +115,72 @@ def _parse_stationslist() -> list[dict]:
     return stations
 
 
+def missing_software_detail(text: str) -> str:
+    """Named packages after stripping the canned missing-software line.
+
+    Empty unless the vendor banner is present *and* extra text names packages.
+    """
+    if not text or not _GENERIC_MISSING_RE.search(text):
+        return ""
+    leftover = _GENERIC_MISSING_RE.sub("", text)
+    leftover = leftover.strip(" \n\r\t.:;,-")
+    return leftover
+
+
+def is_generic_missing_software(text: str) -> bool:
+    """True only when the text is the unnamed vendor banner."""
+    if not text or not _GENERIC_MISSING_RE.search(text):
+        return False
+    return not missing_software_detail(text)
+
+
+def classify_discover_result(
+    err_msg: str,
+    output: str,
+    stations: list,
+    installer_ok: bool,
+) -> dict:
+    """Map installer side effects to the JSON the Stations SPA consumes.
+
+    The green SPA paints `output` as a red banner whenever success is false,
+    and also paints "No connected stations available" when success is true
+    with an empty list. We must not return the canned missing-software line
+    as a failure when no packages were named and no stations were found.
+    """
+    if stations:
+        return {"success": True, "stations": stations, "output": output or ""}
+
+    # Do not join the canned errors-file line with unrelated stdout; that
+    # would invent a "missing: <scan log>" banner.
+    named = missing_software_detail(err_msg) or missing_software_detail(output)
+    if named:
+        return {
+            "success": False,
+            "stations": [],
+            "output": f"Node install is missing: {named}",
+        }
+
+    generic_err = is_generic_missing_software(err_msg)
+    generic_out = is_generic_missing_software(output)
+    if generic_err or generic_out:
+        if err_msg and not generic_err:
+            return {"success": False, "stations": [], "output": err_msg}
+        if output and not generic_out and not installer_ok:
+            return {"success": False, "stations": [], "output": output}
+        return {"success": True, "stations": [], "output": ""}
+
+    if err_msg:
+        return {"success": False, "stations": [], "output": err_msg}
+
+    if installer_ok:
+        return {"success": True, "stations": [], "output": output or ""}
+
+    if output:
+        return {"success": False, "stations": [], "output": output}
+
+    return {"success": True, "stations": [], "output": ""}
+
+
 # ── Index ─────────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -133,16 +208,17 @@ async def stations_discover(
         except OSError:
             pass
 
-    success, output = await _run_installer(["--get-stations"], timeout=30)
-    logger.info("Station discover rc=%s by=%r output=%r", success, session.get("username"), output[:200])
+    installer_ok, output = await _run_installer(["--get-stations"], timeout=30)
+    logger.info("Station discover rc=%s by=%r output=%r", installer_ok, session.get("username"), output[:200])
 
+    err_msg = ""
     if _ERRORS_FILE.exists():
         err_msg = _ERRORS_FILE.read_text(errors="replace").strip()
         _ERRORS_FILE.unlink(missing_ok=True)
-        return JSONResponse({"success": False, "stations": [], "output": err_msg or output})
 
     stations = _parse_stationslist()
-    return JSONResponse({"success": success or bool(stations), "stations": stations, "output": output})
+    result = classify_discover_result(err_msg, output, stations, installer_ok)
+    return JSONResponse(result)
 
 
 # ── Test ──────────────────────────────────────────────────────────────────────

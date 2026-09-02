@@ -101,6 +101,7 @@ Check
   Line dropdown: appearances like 6000--1 / 6000--2
   GET /button-colors returns the colour list
   Sidebar footer: AMP vX.Y.Z plus Web v N (from amp_web_version)
+  Stations Acquire with no stations: empty table, no red missing-software banner
 TXT
 
 chmod +x "$STAGE/$NAME/update.sh" "$STAGE/$NAME/install.sh" 2>/dev/null || true
